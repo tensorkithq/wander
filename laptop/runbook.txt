@@ -159,4 +159,40 @@ gait/LED/mood shift with the room, creeps toward an RF source, porthole + laptop
 audio live. RF density on this node comes from a companion WiFi scan (the Air can't
 self-scan) or, later, the Phase-2 sensor puck. Expo app = the mobile porthole +
 phone-as-mini-wand (design §7).
+
+==============================================================================
+FIELD NOTES (verified 2026-05-28)
+==============================================================================
+- DimOS is installed on this laptop at:  /Users/0x/srv/dimos
+  (the live clone; this supersedes the ~/srv/reality-instrument/dimos path in
+  Stage 2 above -- use /Users/0x/srv/dimos).
+- Go2 reachable at  ROBOT_IP=192.168.203.75  (DHCP -> WILL change; re-discover via
+  the Unitree app / arp before each session). Stage 3 (dog on LAN) = DONE.
+- Connectivity confirmed: launched a unitree-go2 blueprint, Rerun viewer came up;
+  camera feed + robot pose populate.
+
+*** THE AIR HAS NO USABLE LiDAR *** (see design §4a)
+- The default `unitree-go2` blueprint is the full LiDAR mapping/costmap/planner/
+  explorer stack -> on the Air its point cloud / voxel map / costmap / paths stay
+  EMPTY. Not broken; wrong blueprint for a no-LiDAR robot.
+- USE CAMERA-FIRST BLUEPRINTS instead:
+    export ROBOT_IP=192.168.203.75
+    dimos run unitree-go2-basic            # camera + control, no empty panels
+    dimos run unitree-go2-detection        # YOLO on the camera (most rewarding)
+    dimos run unitree-go2-keyboard-teleop  # drive while watching the camera
+
+SPLIT-ARCHITECTURE CAVEAT
+- Running `unitree-go2-detection` LOCALLY pulls perception (YOLO/torch) onto THIS
+  laptop -- which diverges from the "perception on the GPU brain" rule (HARD RULE 1)
+  and costs disk/RAM. OK for initial prototyping on the M2 Pro (MPS); migrate
+  perception to the brain node when wiring the DDS split. Watch the ~38 GB disk.
+
+RERUN / VIEWER NOTES
+- 3D view: left-drag orbit, right-drag/scroll pan-zoom. Left panel = entity tree
+  (toggle layers via the eye). Bottom = timeline scrub (Rerun records everything).
+- WebsocketVis web UI at http://localhost:7779 lets you click nav goals -- needs a
+  map, so NOT useful on the Air.
+- Version warning: dimos-viewer v0.32.0-alpha.1 vs Rerun SDK v0.32.2 = minor
+  same-line mismatch. Ignore unless you see glitches; then:
+    cargo binstall rerun-cli@0.32.2
 ==============================================================================

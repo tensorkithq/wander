@@ -74,9 +74,9 @@ DimOS `dimos/robot/unitree/go2/connection.py` uses `unitree_webrtc_connect` (con
 
 | Channel | Use |
 |---|---|
-| `lidar_stream()` → PointCloud2 | Spatial "pressure" (cramped/open), crowd density, metal/glass via reflectivity |
+| `lidar_stream()` → PointCloud2 | ⚠️ **Empty on this Air** (no usable LiDAR — see §4a). Spatial sensing falls back to the camera. |
 | `lowstate_stream()` → LowStateMsg | IMU (vibration, tremor, tilt, motion energy) + battery (metabolism/energy mood) |
-| `video_stream()` → RGB | **Light flicker** (mains/PWM via rolling-shutter banding), color temp, screen glow, motion, people, VLM scene-mood |
+| `video_stream()` → RGB | **Primary spatial + scene sensor** (LiDAR is dark). Light flicker (mains/PWM via rolling-shutter banding), color temp, screen glow, motion, people, **object detection (YOLO)**, VLM scene-mood |
 | `odom_stream()` → Pose | Position/motion for Music mode + Hunt gradient-walking |
 | `move()` Twist, `standup/balance_stand/free_walk/liedown`, `enable_rage_mode()` | **Primary expression**: creep, skitter, cower, alert-stance, point, walk up-gradient |
 | LED color (VUI topic) | Ghost-mode strobe, Creature color-mood |
@@ -86,6 +86,24 @@ DimOS `dimos/robot/unitree/go2/connection.py` uses `unitree_webrtc_connect` (con
 - Onboard mic (no voice function) and onboard speaker (none) → **audio in/out lives on the companion**
 - RF-scan-from-the-dog (can't run a WiFi scan on the Air) → **RF density via companion or Phase-2 puck**
 - Low-level joint torque control (WebRTC is high-level; lowstate is read-only)
+- **LiDAR point cloud — NOT usable on this Air** (verified empirically 2026-05-28)
+
+### §4a — LiDAR correction (verified 2026-05-28)
+The original §4 listed LiDAR as available. **It is not on this Air.** Running the default
+LiDAR-robot blueprint (`unitree-go2`, with voxel-grid mapper + costmap + A* planner + frontier
+explorer) on the Air: the camera feed and robot pose populate in Rerun, but the **point cloud,
+voxel map, costmap, and planned paths stay empty** — no LiDAR is feeding them. The L1 4D LiDAR is
+the feature that distinguishes Go2 **Pro/EDU** from the **Air** budget tier; the Air ships without
+it. (If a quick physical check ever shows otherwise, revisit — but **design as camera-first, no
+LiDAR**.)
+
+**Consequences:**
+- Spatial "pressure" / room-shape / crowd-density sensing moves from LiDAR to the **camera**
+  (depth-from-vision, motion, scene VLM) and/or the **Phase-2 puck**.
+- Use **camera-first blueprints** (`unitree-go2-basic`, `unitree-go2-detection`,
+  `unitree-go2-keyboard-teleop`), NOT the mapping/nav stack — most of that dashboard is dark on the Air.
+- **Object detection on the live camera (YOLO)** is the most visually rewarding thing the Air can
+  do — a strong native input for Creature/Scanner modes.
 
 ## 5. The core loop
 
