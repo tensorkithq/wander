@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Go2 Bridge — debug client</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font-family: ui-monospace, monospace; background:#111; color:#ddd; }
+  header { padding:.5rem .75rem; background:#1a1a1a; display:flex; gap:1rem; align-items:center; flex-wrap:wrap; }
+  #cam { width:100%; max-width:640px; background:#000; display:block; margin:.5rem auto; aspect-ratio:4/3; object-fit:contain; }
+  .pad { display:grid; grid-template-columns:repeat(3,72px); grid-gap:.4rem; justify-content:center; margin:.5rem; }
+  button.k { height:72px; font-size:1.4rem; background:#222; color:#eee; border:1px solid #444; border-radius:8px; touch-action:none; user-select:none; }
+  button.k:active, button.k.on { background:#3a6; }
+  #stop { grid-column:1/4; height:54px; background:#a33; }
+  .row { display:flex; gap:1rem; align-items:center; justify-content:center; flex-wrap:wrap; }
+  label { font-size:.85rem; }
+  #status { font-size:.85rem; }
+  .lin { color:#6cf; } .ang { color:#fc6; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Go2 Bridge</strong>
+  <span id="status">connecting…</span>
+  <span>lin <span class="lin" id="lin">0.00</span> m/s · ang <span class="ang" id="ang">0.00</span> rad/s</span>
+</header>
+
+<img id="cam" alt="camera" />
+
+<div class="row">
+  <label>speed <input id="speed" type="range" min="0.1" max="0.6" step="0.05" value="0.3" /></label>
+  <label>turn <input id="turn" type="range" min="0.2" max="1.2" step="0.1" value="0.8" /></label>
+</div>
+
+<div class="pad">
+  <span></span>
+  <button class="k" data-dir="fwd">▲</button>
+  <span></span>
+  <button class="k" data-dir="left">◄</button>
+  <button class="k" data-dir="back">▼</button>
+  <button class="k" data-dir="right">►</button>
+  <button class="k" id="stop" data-dir="stop">STOP</button>
+</div>
+<p style="text-align:center;font-size:.8rem;color:#888">Keyboard: W/A/S/D or arrows. Release = stop (deadman).</p>
+
+<script>
+const base = location.origin;
+document.getElementById("cam").src = base + "/video_feed/color_image";
+
+const speed = document.getElementById("speed");
+const turn  = document.getElementById("turn");
+const linEl = document.getElementById("lin");
+const angEl = document.getElementById("ang");
+const statusEl = document.getElementById("status");
+
+let active = new Set();      // currently held directions
+let lastSent = 0;
+
+function vec() {
+  let vx = 0, wz = 0;
+  if (active.has("fwd"))  vx += +speed.value;
+  if (active.has("back")) vx -= +speed.value;
+  if (active.has("left"))  wz += +turn.value;
+  if (active.has("right")) wz -= +turn.value;
+  return { vx, vy: 0, wz };
+}
+
+async function send() {
+  const v = vec();
+  linEl.textContent = v.vx.toFixed(2);
+  angEl.textContent = v.wz.toFixed(2);
+  try {
+    await fetch(base + "/cmd_vel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(v),
+    });
+    statusEl.textContent = "connected";
+  } catch (e) {
+    statusEl.textContent = "send failed";
+  }
+}
+
+// Steady ~15 Hz heartbeat so the deadman stays fed while a key is held,
+// and a final zero goes out on release.
+setInterval(() => { if (active.size || (Date.now() - lastSent) < 600) { send(); lastSent = active.size ? Date.now() : lastSent; } }, 66);
+
+function press(dir)   { if (dir === "stop") { active.clear(); send(); return; } active.add(dir); send(); }
+function release(dir) { active.delete(dir); lastSent = Date.now(); send(); }
+
+const keymap = { w:"fwd", s:"back", a:"left", d:"right", arrowup:"fwd", arrowdown:"back", arrowleft:"left", arrowright:"right" };
+addEventListener("keydown", e => { const d = keymap[e.key.toLowerCase()]; if (d && !e.repeat) press(d); });
+addEventListener("keyup",   e => { const d = keymap[e.key.toLowerCase()]; if (d) release(d); });
+
+document.querySelectorAll("button.k").forEach(btn => {
+  const dir = btn.dataset.dir;
+  const down = e => { e.preventDefault(); btn.classList.add("on"); press(dir); };
+  const up   = e => { e.preventDefault(); btn.classList.remove("on"); release(dir); };
+  btn.addEventListener("pointerdown", down);
+  btn.addEventListener("pointerup", up);
+  btn.addEventListener("pointerleave", up);
+  btn.addEventListener("pointercancel", up);
+});
+</script>
+</body>
+</html>
