@@ -1,0 +1,162 @@
+==============================================================================
+RUNBOOK — Reality Instrument LAPTOP "Controller / Robot-IO" Node
+For: the operator (or agent) setting up the MacBook node.
+Project design: ../docs/plans/2026-05-27-reality-instrument-design.md
+Companion node:  ../gpu/runbook.txt  (the "brain")
+Last verified: 2026-05-27
+==============================================================================
+
+PURPOSE
+-------
+This node is the controller / robot-IO. It:
+  1. Holds the WebRTC LocalSTA connection to the Unitree Go2 Air (must be on the
+     dog's network -- the cloud brain CANNOT reach the dog directly).
+  2. Runs the low-latency REFLEX / safety layer (stop / avoid) -- stays local, on
+     the laptop, NOT across the internet.
+  3. Renders generative audio out the laptop SPEAKER (the dog's "voice"). Synth
+     params come from the brain over DDS; this node makes the sound.
+  4. Serves the Rerun browser viewer (the porthole) and the FastAPI/WebSocket the
+     Expo companion app talks to.
+  5. Joins the project tailnet and exchanges sensor/behavior messages with the
+     GPU brain via CycloneDDS.
+
+It does NOT run heavy perception or the LLM mood-agent -- those run on the GPU
+brain node (see ../gpu/runbook.txt).
+
+ENVIRONMENT (verified 2026-05-27)
+---------------------------------
+- Machine:  MacBook Pro 14" (Mac14,9), Apple M2 Pro, arm64, 10-core, 16 GB RAM
+- OS:       macOS 26.2
+- Disk:     ~38 GB free, drive ~92% full  <-- TIGHT. Keep the install light.
+- Python:   system python is 3.14 (too new for DimOS, which caps at 3.12).
+            Use uv to provision a 3.12 venv. Do NOT use system python directly.
+- Tailscale: Tailscale.app is installed but STOPPED -> start + log in.
+
+HARD RULES (do not violate)
+---------------------------
+1. LIGHT INSTALL ONLY. Do NOT install the 'base', 'perception', 'cuda', or 'all'
+   extras -- they pull PyTorch + vision models (multi-GB) and will blow the ~38 GB
+   disk. Perception lives on the GPU brain. This node installs only:
+   unitree, web, visualization, dds (+ a light audio lib). See Stage 2.
+2. KEEP INTERNET WHILE TALKING TO THE DOG. The Go2 must be reachable AND Tailscale
+   must reach the cloud. Solution: put the Go2 onto YOUR LAN/router (STA mode), so
+   the laptop stays on normal WiFi (internet + Tailscale) and reaches the dog by IP.
+   Do NOT connect the laptop onto the dog's own AP -- that kills your internet
+   (single WiFi radio) and the brain link dies. (Ethernet/USB-LAN is an alt.)
+3. REFLEX LAYER STAYS LOCAL. Never route the tight stop/avoid loop through the
+   cloud brain. Cloud = cognition/mood (latency-tolerant) only.
+4. Use the uv-managed Python 3.12 venv for everything.
+
+------------------------------------------------------------------------------
+STAGE 1 — prerequisites
+------------------------------------------------------------------------------
+  # Homebrew (if absent): https://brew.sh
+  # macOS system libs DimOS uses (from its install.sh macOS path):
+  brew install portaudio libjpeg-turbo git-lfs gnu-sed
+
+  # uv package manager
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+  uv --version
+
+  # Tailscale: open Tailscale.app and log in (it is installed but stopped).
+  # CLI lives at: /Applications/Tailscale.app/Contents/MacOS/Tailscale
+  # Optionally alias it:  alias tailscale=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+
+------------------------------------------------------------------------------
+STAGE 2 — light DimOS install (NO perception)
+------------------------------------------------------------------------------
+  mkdir -p ~/srv/reality-instrument && cd ~/srv/reality-instrument
+  git clone https://github.com/dimensionalOS/dimos.git 2>/dev/null || (cd dimos && git pull)
+  cd dimos
+
+  # 3.12 venv (system python is 3.14 -> unsupported)
+  uv venv --python 3.12
+  source .venv/bin/activate
+
+  # cherry-pick ONLY the light extras. NOT base/perception/cuda/all.
+  uv pip install -e '.[unitree,web,visualization,dds]'
+  uv pip install sounddevice numpy        # light generative-audio rendering
+
+  VERIFY (watch the disk -- `df -h /System/Volumes/Data` should NOT approach 0):
+    python -c "import dimos; print('dimos import ok')"
+    python -c "import sounddevice; print('audio ok')"
+  NOTE: if any extra tries to pull torch/CUDA, you picked a heavy extra -- back it
+  out. This node must stay torch-free.
+
+------------------------------------------------------------------------------
+STAGE 3 — put the Go2 on your LAN and find its IP
+------------------------------------------------------------------------------
+  # Use the Unitree app to join the Go2 to your home/lab WiFi (STA mode), so it
+  # gets a DHCP IP on the same network as this laptop.
+  # Find the dog's IP (scan your subnet or check the router/app):
+  #   arp -a | grep -i unitree   (or scan, e.g. nmap -sn 192.168.1.0/24)
+  ping <DOG_LAN_IP>          # must succeed before WebRTC will connect
+
+  RECORD: DOG_LAN_IP = ____________
+  (DimOS go2 connection uses WebRTCConnectionMethod.LocalSTA, i.e. connect by IP.)
+
+------------------------------------------------------------------------------
+STAGE 4 — connectivity smoke test (light; no perception, no brain yet)
+------------------------------------------------------------------------------
+  # Prove the WebRTC link + telemetry + a safe motion command, locally.
+  # Quickest: DimOS replay (no hardware) to confirm the stack runs:
+  dimos --replay run unitree-go2-agentic
+  # Then the real dog (high-level sport mode over WebRTC):
+  dimos run unitree-go2-agentic --robot-ip <DOG_LAN_IP>
+
+  CONFIRM these streams come up (per dimos/robot/unitree/go2/connection.py):
+    [ ] lowstate_stream()  -> IMU + battery
+    [ ] video_stream()     -> RGB camera
+    [ ] lidar_stream()     -> PointCloud2
+    [ ] a small move()/standup completes safely (clear space around the dog!)
+    [ ] LED color command via the VUI topic changes the front lamp
+  SAFETY: keep e-stop / the Unitree app handy; test motion in open space.
+
+------------------------------------------------------------------------------
+STAGE 5 — Tailscale + DDS link to the GPU brain
+------------------------------------------------------------------------------
+  tailscale up --ssh --hostname=ri-laptop
+  tailscale ip -4         # RECORD this; the BRAIN node's CycloneDDS peer = this IP
+  # Confirm both nodes see each other:
+  tailscale status        # expect ri-laptop AND ri-gpu-brain
+
+  # CycloneDDS UNICAST over the tailnet (multicast won't traverse Tailscale).
+  # Set CYCLONEDDS_URI to a config peering the BRAIN node's tailscale IP:
+  #   <CycloneDDS><Domain><General><Interfaces>
+  #     <NetworkInterface name="utun*"/></Interfaces></General>
+  #   <Discovery><Peers><Peer address="GPU_BRAIN_TS_IP"/></Peers>
+  #     <ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>
+  # (utun* = the Tailscale interface on macOS.)
+
+------------------------------------------------------------------------------
+STAGE 6 — run the split role
+------------------------------------------------------------------------------
+  # This node: robot-IO + reflex + Rerun viewer + FastAPI + audio.
+  # Brain node: agent/mood + perception, subscribing over the same DDS domain.
+  # In the blueprint, override transports to DDS so robot streams publish to the
+  # tailnet and the brain's behavior intent returns. (Exact blueprint-split config:
+  # coordinate with ../gpu/runbook.txt Stage 4; verify against DimOS docs.)
+  #
+  # Rerun viewer: browser-based by default -> open the served URL; share over the
+  # tailnet so the operator (and a friend) can view the porthole.
+  # FastAPI/WebSocket: the Expo companion app connects here (design §7).
+
+------------------------------------------------------------------------------
+READY CHECK — laptop node is good when ALL pass
+------------------------------------------------------------------------------
+  [ ] uv 3.12 venv active; `import dimos` works; NO torch installed
+  [ ] disk still has comfortable free space (kept the install light)
+  [ ] WebRTC to <DOG_LAN_IP> connects; lowstate/video/lidar stream; safe move works
+  [ ] laptop has BOTH dog reachability AND internet/Tailscale at the same time
+  [ ] tailscale status shows ri-laptop + ri-gpu-brain
+  [ ] Rerun viewer opens; FastAPI/WebSocket is reachable for the Expo app
+
+NEXT
+----
+Build the v1 milestone: Creature mode + Wi-Fi/BT Hunt (design §9) -- dog roams,
+gait/LED/mood shift with the room, creeps toward an RF source, porthole + laptop
+audio live. RF density on this node comes from a companion WiFi scan (the Air can't
+self-scan) or, later, the Phase-2 sensor puck. Expo app = the mobile porthole +
+phone-as-mini-wand (design §7).
+==============================================================================
