@@ -44,7 +44,7 @@ WiFi — so the cloud server cannot hold the robot connection; the laptop must.
    ┌──────────────────────────────────┐        ┌───────────────────────────┐
    │  LAPTOP (M2 Pro) — controller/IO  │◀─────▶ │  CLOUD GPU — "the brain"    │
    │  • holds WebRTC link to dog       │Tailscale│ • DimOS mood agent (LLM)   │
-   │  • reflex/safety layer (low lat)  │  (DDS)  │ • perception (VLM, LiDAR)  │
+   │  • reflex/safety layer (low lat)  │(HTTP/WS)│ • perception (VLM, detect) │
    │  • generative audio → laptop spkr │        │ • generative-audio params  │
    │  • Rerun browser viewer (porthole)│        │ • heavy models             │
    │  • light install (fits ~38GB free)│        └───────────────────────────┘
@@ -62,8 +62,14 @@ perception live on the cloud (hundreds of ms is fine for creature behavior). Do 
 tight control loop across the internet. Camera frames stream laptop→cloud for the heavy VLM; the
 M2 Pro can also run perception locally via MPS if the hop is costly (A/B test).
 
-**Transport caveat:** LCM is UDP-multicast (LAN-only). Across Tailscale use **CycloneDDS**
-(DimOS `--extra dds`) configured for unicast, not LCM.
+**Cross-machine transport (revised 2026-05-28 — DDS dropped):** the laptop↔brain link is a plain
+**HTTP/WebSocket bridge** (the FastAPI `WebBridge` in `laptop/bridge/`), NOT DimOS DDS. Each box runs
+its own DimOS graph; the laptop POSTs frames + sensor scalars to the brain and gets mood/behavior
+back over WebSocket. HTTP/WS rides fine over **userspace-mode Tailscale** (plain TCP), so the
+CycloneDDS-vs-`tailscale0` problem is avoided entirely. DDS-over-Tailscale was abandoned: it needs a
+kernel `tailscale0` NIC that userspace mode doesn't create, and DimOS-native distributed pub/sub is
+over-engineering for the handful of streams here. Tailscale stays purely as the secure network + SSH
+layer. (Phase 1 can also run **entirely on the laptop/MPS** — no brain, no bridge — see §4a.)
 
 ## 4. Native Go2 **Air** capability inventory
 

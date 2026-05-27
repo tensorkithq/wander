@@ -114,33 +114,36 @@ STAGE 4 — connectivity smoke test (light; no perception, no brain yet)
   SAFETY: keep e-stop / the Unitree app handy; test motion in open space.
 
 ------------------------------------------------------------------------------
-STAGE 5 — Tailscale + DDS link to the GPU brain
+STAGE 5 — Tailscale (secure net + SSH only; NO DDS)  [REVISED 2026-05-28]
 ------------------------------------------------------------------------------
   tailscale up --ssh --hostname=ri-laptop
-  tailscale ip -4         # RECORD this; the BRAIN node's CycloneDDS peer = this IP
-  # Confirm both nodes see each other:
+  tailscale ip -4         # RECORD this; the brain reaches the laptop at this IP
   tailscale status        # expect ri-laptop AND ri-gpu-brain
 
-  # CycloneDDS UNICAST over the tailnet (multicast won't traverse Tailscale).
-  # Set CYCLONEDDS_URI to a config peering the BRAIN node's tailscale IP:
-  #   <CycloneDDS><Domain><General><Interfaces>
-  #     <NetworkInterface name="utun*"/></Interfaces></General>
-  #   <Discovery><Peers><Peer address="GPU_BRAIN_TS_IP"/></Peers>
-  #     <ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>
-  # (utun* = the Tailscale interface on macOS.)
+  # DDS-over-Tailscale was DROPPED. The brain link is HTTP/WebSocket (Stage 6),
+  # which works over plain Tailscale (TCP). No CycloneDDS / CYCLONEDDS_URI needed.
 
 ------------------------------------------------------------------------------
-STAGE 6 — run the split role
+STAGE 6 — run the role (HTTP/WS bridge, not a DDS module-split)
 ------------------------------------------------------------------------------
-  # This node: robot-IO + reflex + Rerun viewer + FastAPI + audio.
-  # Brain node: agent/mood + perception, subscribing over the same DDS domain.
-  # In the blueprint, override transports to DDS so robot streams publish to the
-  # tailnet and the brain's behavior intent returns. (Exact blueprint-split config:
-  # coordinate with ../gpu/runbook.txt Stage 4; verify against DimOS docs.)
+  # This node: robot-IO + reflex + Rerun viewer + the FastAPI bridge + audio.
+  # Brain node: its own DimOS graph (perception + mood agent), reached over HTTP/WS.
   #
-  # Rerun viewer: browser-based by default -> open the served URL; share over the
-  # tailnet so the operator (and a friend) can view the porthole.
-  # FastAPI/WebSocket: the Expo companion app connects here (design §7).
+  # The bridge already exists: laptop/bridge/  (WebBridge: MJPEG camera out +
+  # /cmd_vel teleop in, with deadman + clamps). Run it against the Air:
+  #   cd /Users/0x/srv/dimos   # (the live DimOS install)
+  #   python <repo>/laptop/bridge/run.py --robot-ip $ROBOT_IP --port 5555
+  #   open http://localhost:5555/debug
+  #
+  # To add the brain (optional, when wanted): the laptop POSTs frames + sensor
+  # scalars to the brain's HTTP endpoint (its tailnet IP) and consumes mood/
+  # behavior back over a WebSocket -> maps to gait/LED/audio here. No DDS.
+  #
+  # Rerun viewer: browser-based -> open the served URL; share over the tailnet so a
+  # friend can view the porthole. Expo app connects to this node's FastAPI (design §7).
+  #
+  # PHASE-1 SHORTCUT: you can skip the brain entirely and run perception locally on
+  # the M2 Pro (MPS). No Tailscale, no bridge-to-brain. Simplest path to v1.
 
 ------------------------------------------------------------------------------
 READY CHECK — laptop node is good when ALL pass

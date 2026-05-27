@@ -114,19 +114,22 @@ STAGE 3 — Tailscale (join project tailnet; enables laptop<->brain + SSH)
   exchange (Tailscale identity). That is how the operator drives this node.
 
 ------------------------------------------------------------------------------
-STAGE 4 — DDS transport for cross-machine DimOS   [coordinate with laptop node]
+STAGE 4 — cross-machine link  [REVISED 2026-05-28: DDS DROPPED -> HTTP/WS bridge]
 ------------------------------------------------------------------------------
-  # DimOS distributed modules talk over CycloneDDS. Do NOT use LCM across
-  # Tailscale (LCM is UDP-multicast, LAN-only).
-  uv pip install --system -c /workspace/src/constraints.txt -e '.[dds]' || true
-
-  # CycloneDDS over the tailnet must be UNICAST (multicast won't traverse VPN).
-  # Set CYCLONEDDS_URI to a config that lists the LAPTOP node's tailscale IP as a
-  # peer. Fill in once the laptop's tailscale IP is known. Example skeleton:
-  #   <CycloneDDS><Domain><General><Interfaces>
-  #     <NetworkInterface name="tailscale0"/></Interfaces></General>
-  #   <Discovery><Peers><Peer address="LAPTOP_TS_IP"/></Peers>
-  #     <ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>
+  # DO NOT use DimOS DDS across Tailscale. Userspace-mode Tailscale (Stage 3) has
+  # no kernel `tailscale0` NIC, so CycloneDDS can't bind to it; and native
+  # distributed pub/sub is overkill for the few streams we exchange.
+  #
+  # Instead: this brain runs its OWN DimOS graph and talks to the laptop over a
+  # plain HTTP/WebSocket bridge, which rides fine over userspace Tailscale (TCP).
+  #   - Laptop POSTs camera frames + sensor scalars to this node's HTTP endpoint.
+  #   - This node returns mood/behavior intent over a WebSocket the laptop holds.
+  # (The `[dds]` extra and cyclonedds.xml from an earlier run are now unused; leave
+  # or remove. No CYCLONEDDS_URI needed.)
+  #
+  # Reach this node from the laptop over the tailnet by its `tailscale ip -4`
+  # (Stage 3). Serve the brain's HTTP/WS API via DimOS `web` (FastAPI), already
+  # installed in Stage 2.
 
 ------------------------------------------------------------------------------
 READY CHECK — brain node is good when ALL pass
