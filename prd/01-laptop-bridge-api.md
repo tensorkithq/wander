@@ -1,0 +1,91 @@
+# PRD — Workstream 1: Laptop FastAPI Bridge
+
+**Date:** 2026-05-28 · **Status:** draft · **Builds on:** `../laptop/bridge/web_bridge.py` (exists)
+
+## Objective
+Be the **always-on local hub** between Yugo (Go2 Air) and everything else. It owns the single
+WebRTC `LocalSTA` link to the dog and exposes one clean, **safe** HTTP/WebSocket API that the Yugo
+app (and optionally the GPU skills server) code against to **perceive and control Yugo**.
+
+This is the **integration contract** for the whole product. Get this stable and the app + GPU
+server are just clients.
+
+## Users / clients
+- The **Yugo app** (primary client): camera, control, state, voice, wand ingest.
+- The **GPU skills server** (optional): pulls frames/sensors, pushes mood/behavior back.
+- A **browser debug client** (`/debug`, exists) for development.
+
+## Scope
+On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Single Python process
+(DimOS modules + FastAPI/uvicorn). **Light install** (no torch/perception — that's the GPU).
+
+## Non-goals
+- Heavy perception / large models (→ GPU skills server, ws 3).
+- Holding any state the design says lives elsewhere (mapping/nav — N/A on the Air).
+- Public internet exposure without auth (LAN/Tailscale only for now).
+
+## Requirements (objectives → endpoints)
+
+### Already implemented (`WebBridge`)
+- `GET /video_feed/color_image` — MJPEG camera stream.
+- `POST /cmd_vel {vx,vy,wz}` — teleop; **velocity-clamped** (0.6 m/s, 1.2 rad/s).
+- `POST /stop` — zero velocity.
+- `GET /healthz` — liveness + `have_frame` + last-command age.
+- **Deadman watchdog** — auto-stop if no command within 0.4 s. (Keep; safety-critical.)
+
+### To add — control
+- `POST /trick {name}` and `POST /routine {names:[...]}` — fire Go2 `SPORT_CMD` moves
+  (`Hello`, `WiggleHips`, `Stretch`, `FingerHeart`, `RecoveryStand`, `BalanceStand`, dance moves …)
+  via `RTC_TOPIC["SPORT_MOD"]`. Pattern proven in `go2_trick.py`.
+- `POST /led {color|effect}` — front-lamp color via the VUI topic (mood color, Ghost strobe).
+- `POST /mode {creature|ghost|hunt|scanner|music|meditation}` — set the active behavior mode.
+- `POST /dance {bpm, style}` — beat-synced pose/height choreography (or a trick sequence) for
+  "Yugo dances to the music."
+- `POST /breathe {on|off, rate}` — slow body-height oscillation for meditation mode.
+
+### To add — perception / state out
+- `GET /ws/state` (WebSocket) — push live telemetry at ~10–20 Hz:
+  `battery`, `imu`/`pose`, `mode`, `mood` (scalar + label + color), `detections` (YOLO: labels +
+  boxes + person count), `audio_level`. This drives the app's "aura."
+- `GET /detections` — latest camera detections (snapshot form of the WS field).
+
+### To add — voice (Yugo's ears + mouth)
+- `POST /say {text}` — Yugo speaks: text → **Deepgram Aura TTS** → laptop speaker (+ broadcast
+  caption on `/ws/state`). Pre-cached signature lines for demo snappiness.
+- `POST /listen/start` · `/listen/stop` **or** `GET /ws/voice` — stream mic audio in (from app or
+  laptop) → **Deepgram streaming STT** → text → routed to the agent/mode handler.
+- (Yugo's *responses* come from the DimOS agentic loop or the GPU mood skill; this API just carries
+  audio in and speech out.)
+
+### To add — wand ingest (the phone as a sensor node)
+- `POST /sensor {source, magnetometer, accel, light, gesture, ts}` — ingest the phone's readings.
+  Drives sonification, mode reactions (Yugo turns/flares toward a field), and music triggers
+  (a `gesture:"wave"` starts/changes the track).
+
+### To add — audio
+- `POST /audio/play {style|seed}` / `POST /audio/stop` — generative soundscape/music on the laptop
+  speaker (Yugo is mute on its own). Style also feeds `/dance`.
+
+## Safety (hard requirements)
+- Deadman watchdog (exists) + velocity clamps (exists) on all motion paths, including `/trick`,
+  `/dance`, `/breathe`.
+- A global `POST /stop` that cancels any routine immediately.
+- Tricks gated behind a "clear space" acknowledgement flag from the client.
+
+## Dependencies
+- DimOS `web` (FastAPI), `unitree` (WebRTC `GO2Connection`), `unitree_webrtc_connect`
+  (`SPORT_CMD`, `RTC_TOPIC`), `sounddevice`/`expo-av`-side for audio, Deepgram SDK + API key.
+- `ROBOT_IP` (DHCP — re-discover each session).
+
+## Success criteria
+- App can: see the camera, drive + stop, fire tricks/dance, read live state/mood, send wand data,
+  make Yugo speak, and stream voice in — all over LAN/Tailscale, with the deadman keeping the dog
+  safe.
+- Runs light on the M2 Pro (no torch); reconnects cleanly when `ROBOT_IP` changes.
+
+## Open questions
+- TTS/STT: run Deepgram from the **laptop** or have the **app** call Deepgram directly and just POST
+  text? (Leaning: app captures mic + calls Deepgram → POSTs text to `/say`-equivalent for behavior,
+  to minimize laptop audio plumbing. Decide during build.)
+- Does Yugo's "reply" generation live in the DimOS agentic blueprint here, or in the GPU mood skill?
+  (Phase 1: simplest agentic blueprint locally; offload later.)
