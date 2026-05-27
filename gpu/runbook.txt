@@ -1,0 +1,145 @@
+==============================================================================
+RUNBOOK — Reality Instrument GPU "Brain" Node
+For: the companion agent running ON the RunPod A5000 pod.
+Project design: ../docs/plans/2026-05-27-reality-instrument-design.md
+Last verified: 2026-05-27
+==============================================================================
+
+PURPOSE
+-------
+This pod is the "brain" node. It runs DimOS perception + the agentic "mood"
+interpreter, and (optionally) generative-audio parameter generation.
+
+It does NOT connect to the Unitree Go2 directly. The dog's WebRTC link lives on
+the LAPTOP node (which must be on the dog's WiFi). This box receives sensor
+streams over Tailscale/DDS and returns behavior intent. Do not attempt WebRTC to
+the robot from here.
+
+ENVIRONMENT (verified 2026-05-27)
+---------------------------------
+- Host:    RunPod Pod, Ubuntu container, user=root, hostname=d18adb202551
+- GPU:     NVIDIA RTX A5000, 24 GB (24564 MiB), driver 570.211.01
+- PyTorch: torch 2.4.1+cu124, torch.cuda.is_available() == True (sees the A5000)
+- Disk:
+    /          overlay = 20 GB, EPHEMERAL  -> do NOT fill; lost on pod restart
+    /workspace network volume = huge, PERSISTENT -> put ALL heavy data here
+
+HARD RULES (do not violate)
+---------------------------
+1. DO NOT upgrade / downgrade / reinstall torch. Use the pre-baked
+   torch 2.4.1+cu124. If any install tries to change torch, pin it
+   (constraint: torch==2.4.1) and retry.
+   NOTE: the design doc assumed torch 2.8/cu128; the ACTUAL image is
+   2.4.1/cu124. Align to 2.4.1.
+2. All caches, venvs, models, repos live under /workspace. Never bloat the
+   20 GB ephemeral root (/).
+3. After EVERY install step, verify torch is still 2.4.1+cu124 and
+   cuda.is_available() is True.
+4. This node does NOT open WebRTC to the Go2. Robot I/O = laptop node.
+5. Never terminate the pod. Stop-to-volume only (preserves the Low-availability
+   A5000 slot).
+
+------------------------------------------------------------------------------
+STAGE 1 — box prep            [STATUS: DONE 2026-05-27; commands are idempotent]
+------------------------------------------------------------------------------
+  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+  python -c "import torch; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0))"
+
+  # route ALL heavy data to the persistent volume (critical: / is only 20G)
+  mkdir -p /workspace/cache/{uv,pip,hf} /workspace/src
+  cat >> /root/.bashrc <<'EOF'
+  export UV_CACHE_DIR=/workspace/cache/uv
+  export PIP_CACHE_DIR=/workspace/cache/pip
+  export HF_HOME=/workspace/cache/hf
+  export PATH="$HOME/.local/bin:$PATH"
+  EOF
+  source /root/.bashrc
+
+  # system libs DimOS needs (from its install.sh)
+  apt-get update && apt-get install -y --no-install-recommends \
+    git git-lfs g++ python3-dev portaudio19-dev libturbojpeg libgl1 libegl1 curl
+
+  # uv package manager
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source /root/.bashrc
+  uv --version
+
+  VERIFY: torch line prints "2.4.1+cu124 | cuda True | NVIDIA RTX A5000"
+
+------------------------------------------------------------------------------
+STAGE 2 — install DimOS (brain extras) WITHOUT touching torch
+------------------------------------------------------------------------------
+  # pin torch so nothing changes it
+  printf "torch==2.4.1\n" > /workspace/src/constraints.txt
+
+  cd /workspace/src
+  git clone https://github.com/dimensionalOS/dimos.git 2>/dev/null || (cd dimos && git pull)
+  cd /workspace/src/dimos
+
+  # scoped extras for the brain: agents + perception + web.
+  # AVOID 'all' and 'cuda' extras — they drag xformers, which is torch-version
+  # locked and will fight the pinned 2.4.1.
+  uv pip install --system -c /workspace/src/constraints.txt -e '.[agents,perception,web]' \
+    || pip install -c /workspace/src/constraints.txt -e '.[agents,perception,web]'
+
+  VERIFY (must pass):
+    python -c "import torch; assert torch.__version__.startswith('2.4.1'), torch.__version__; print('torch ok', torch.__version__, torch.cuda.is_available())"
+    python -c "import dimos; print('dimos import ok')"
+
+  ON FAILURE:
+    - dep demands a different torch  -> add a matching pin to constraints.txt, or
+      drop the offending extra (usually xformers via 'cuda'); re-run.
+    - onnxruntime-gpu vs CUDA 12.4   -> install plain 'onnxruntime' (CPU) or a
+      cu12 build matching 12.4.
+    - build errors on a vision pkg   -> ensure Stage-1 apt libs are present.
+
+------------------------------------------------------------------------------
+STAGE 3 — Tailscale (join project tailnet; enables laptop<->brain + SSH)
+------------------------------------------------------------------------------
+  curl -fsSL https://tailscale.com/install.sh | sh
+
+  # containers lack /dev/net/tun -> userspace networking mode
+  tailscaled --tun=userspace-networking \
+             --socks5-server=localhost:1055 \
+             --outbound-http-proxy-listen=localhost:1055 \
+             >/workspace/tailscaled.log 2>&1 &
+
+  # auth: prefer an auth key in env TS_AUTHKEY (tailnet admin console).
+  # Interactive also works: omit --authkey and open the printed URL.
+  tailscale up --ssh --hostname=ri-gpu-brain --authkey="${TS_AUTHKEY:?set TS_AUTHKEY first}"
+
+  tailscale ip -4     # RECORD this IP; the laptop node points DDS at it
+
+  NOTE: --ssh lets the laptop SSH into this box over the tailnet with no key
+  exchange (Tailscale identity). That is how the operator drives this node.
+
+------------------------------------------------------------------------------
+STAGE 4 — DDS transport for cross-machine DimOS   [coordinate with laptop node]
+------------------------------------------------------------------------------
+  # DimOS distributed modules talk over CycloneDDS. Do NOT use LCM across
+  # Tailscale (LCM is UDP-multicast, LAN-only).
+  uv pip install --system -c /workspace/src/constraints.txt -e '.[dds]' || true
+
+  # CycloneDDS over the tailnet must be UNICAST (multicast won't traverse VPN).
+  # Set CYCLONEDDS_URI to a config that lists the LAPTOP node's tailscale IP as a
+  # peer. Fill in once the laptop's tailscale IP is known. Example skeleton:
+  #   <CycloneDDS><Domain><General><Interfaces>
+  #     <NetworkInterface name="tailscale0"/></Interfaces></General>
+  #   <Discovery><Peers><Peer address="LAPTOP_TS_IP"/></Peers>
+  #     <ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>
+
+------------------------------------------------------------------------------
+READY CHECK — brain node is good when ALL pass
+------------------------------------------------------------------------------
+  [ ] nvidia-smi shows RTX A5000
+  [ ] torch 2.4.1+cu124 and cuda.is_available() == True
+  [ ] `python -c "import dimos"` succeeds
+  [ ] `tailscale status` shows this node (ri-gpu-brain) AND the laptop node
+  [ ] caches + repo are under /workspace; `df -h /` shows overlay not near full
+
+NEXT (NOT on this node)
+-----------------------
+Laptop node holds the Go2 WebRTC link, the low-latency reflex layer, the Rerun
+viewer, and the companion-speaker audio. The Expo app connects to the laptop's
+FastAPI. v1 milestone: Creature mode + Wi-Fi/BT Hunt. See design doc §3, §7, §9.
+==============================================================================

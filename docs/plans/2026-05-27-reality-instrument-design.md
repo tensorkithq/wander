@@ -175,8 +175,10 @@ $0.69 (Unavailable) · RTX PRO 4500 32 GB $0.74 (High stock, guaranteed-launch f
 7. Scoped **`uv`** install of DimOS (perception/agents/web extras) on top of the base image.
 
 **Caveats:**
-- **Torch-version alignment:** DimOS may pin a torch version different from the image's 2.8.0 —
-  let the resolver reconcile / install against existing torch, don't bloat disk with two torch builds.
+- **Torch-version alignment:** the provisioned A5000 pod's image ships **torch 2.4.1+cu124**
+  (verified 2026-05-27), not 2.8/cu128. **Do not upgrade torch** — pin `torch==2.4.1` and install
+  DimOS scoped extras (`agents,perception,web`), avoiding the `cuda`/`all` extras that drag
+  torch-locked `xformers`. See `gpu/runbook.txt` for the exact agent-followable procedure.
 - **Spot/interruptible is fine for prototyping** IF work lives on the Network Volume + committed to git.
 - **Pre-bake setup** (uv install + Tailscale) as a startup script so you don't pay GPU-hours to install.
 
