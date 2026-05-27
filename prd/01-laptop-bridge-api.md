@@ -49,13 +49,17 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
   boxes + person count), `audio_level`. This drives the app's "aura."
 - `GET /detections` — latest camera detections (snapshot form of the WS field).
 
-### To add — voice (Yugo's ears + mouth)
-- `POST /say {text}` — Yugo speaks: text → **Deepgram Aura TTS** → laptop speaker (+ broadcast
-  caption on `/ws/state`). Pre-cached signature lines for demo snappiness.
-- `POST /listen/start` · `/listen/stop` **or** `GET /ws/voice` — stream mic audio in (from app or
-  laptop) → **Deepgram streaming STT** → text → routed to the agent/mode handler.
-- (Yugo's *responses* come from the DimOS agentic loop or the GPU mood skill; this API just carries
-  audio in and speech out.)
+### To add — agent (Yugo's brain) + voice routing
+- **Agentic brain runs here.** The bridge embeds/launches DimOS `unitree-go2-agentic`
+  (`export OPENAI_API_KEY`, `export ROBOT_IP`; NL→behavior via the OpenAI LLM). Camera-first on the
+  Air — the blueprint's LiDAR/spatial-memory features are no-ops. Ref: `koolamusic/dimos` Go2 docs.
+- `POST /agent/say {text}` — feed a recognized utterance (from the **app's Deepgram STT**) into the
+  agent (the programmatic equivalent of the doc's `humancli`); returns Yugo's **reply text** +
+  triggers behavior (move / trick / LED / mode). The **app** speaks the reply via Deepgram Aura TTS.
+- `POST /say {text}` — force a scripted line as a behavior cue + caption (broadcast on `/ws/state`).
+  Audio playback is app-side; for headless laptop-speaker use the bridge MAY render via DimOS
+  `tts/node_openai` as a fallback.
+- **Voice capture + STT + TTS = app-side (Deepgram), NOT the bridge.** The bridge carries text.
 
 ### To add — wand ingest (the phone as a sensor node)
 - `POST /sensor {source, magnetometer, accel, light, gesture, ts}` — ingest the phone's readings.
@@ -83,9 +87,12 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
   safe.
 - Runs light on the M2 Pro (no torch); reconnects cleanly when `ROBOT_IP` changes.
 
+## Resolved decisions (2026-05-28)
+- **Voice I/O = app-side Deepgram.** The app captures mic → Deepgram STT → POSTs text to
+  `/agent/say`; Yugo's reply text → Deepgram Aura TTS in the app. The bridge does **no** audio STT/TTS.
+- **Brain = DimOS agentic mode with `OPENAI_API_KEY`** (`dimos run unitree-go2-agentic`), running on
+  the bridge/laptop. Phase 1 keeps it local; the GPU skills server (ws3) is an optional later offload.
+
 ## Open questions
-- TTS/STT: run Deepgram from the **laptop** or have the **app** call Deepgram directly and just POST
-  text? (Leaning: app captures mic + calls Deepgram → POSTs text to `/say`-equivalent for behavior,
-  to minimize laptop audio plumbing. Decide during build.)
-- Does Yugo's "reply" generation live in the DimOS agentic blueprint here, or in the GPU mood skill?
-  (Phase 1: simplest agentic blueprint locally; offload later.)
+- Exact programmatic hook to inject text into the agent (wrap `humancli` vs a direct agent API) —
+  confirm against `koolamusic/dimos` internals during build.

@@ -42,9 +42,13 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
   through Yugo" (the app/laptop speaker).
 - **WebRTC `LocalSTA` requires the laptop on the dog's LAN** → only the laptop holds the robot link.
 - **Transport = HTTP/WebSocket over Tailscale** (DDS dropped). Tailscale = secure net + SSH only.
-- **Voice = Deepgram** (streaming STT + Aura TTS) for low latency; DimOS also ships whisper/openai
-  TTS nodes as fallback.
-- **Brain LLM + Deepgram are cloud APIs** → low local load; needs network + API keys.
+- **Voice = Deepgram, app-side** (streaming STT + Aura TTS) for low latency. The bridge carries
+  *text*, not audio.
+- **Brain = DimOS agentic mode with `OPENAI_API_KEY`** on the bridge/laptop (`dimos run
+  unitree-go2-agentic`; NL→behavior; camera-first on the Air). Per `koolamusic/dimos` Go2 docs:
+  https://github.com/koolamusic/dimos/blob/main/docs/platforms/quadruped/go2/index.md
+- Both are cloud APIs → low local load; needs network + API keys (`OPENAI_API_KEY` on bridge,
+  Deepgram key in the app).
 
 ## Naming
 - Robot dog = **Yugo**. App = **Yugo**. Repo = `tensorkithq/wander`.

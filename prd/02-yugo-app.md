@@ -51,9 +51,11 @@ Inherits the original wand spec's "brass + black resin + glow" feel, translated 
 - **Trick buttons** — Hello / WiggleHips / Stretch / FingerHeart → `POST /trick`.
 - **Mode switcher** — Creature / Ghost / Hunt / Scanner / Music / Meditation → `POST /mode`.
 
-### Talk to Yugo (voice)
-- **Push-to-talk** → capture mic → **Deepgram STT** → text → bridge/agent.
-- **Yugo replies** — text → **Deepgram Aura TTS** → playback (`expo-av`) + on-screen **caption**.
+### Talk to Yugo (voice) — Deepgram is app-side
+- **Push-to-talk** → capture mic → **Deepgram streaming STT** → text → `POST /agent/say` on the
+  bridge (which routes it to DimOS agentic mode / OpenAI).
+- **Yugo replies** — the bridge returns reply text → **Deepgram Aura TTS** → playback (`expo-av`) +
+  on-screen **caption**. (All audio capture/STT/TTS happens in the app; the bridge carries text.)
 - Signature lines surfaced as the avatar "speaks." Example flow: *"Yugo, you're safe"* → Yugo calms,
   *"Yugo feels calm now."*
 
@@ -88,7 +90,10 @@ Inherits the original wand spec's "brass + black resin + glow" feel, translated 
   **guided into a calm meditation** — the whole demo arc, from the app.
 - UI visibly **feels** Yugo's mood; STOP is always one tap away.
 
+## Resolved decisions (2026-05-28)
+- **Deepgram runs in the app** (STT + Aura TTS). The app holds the Deepgram key; the bridge gets
+  text via `POST /agent/say` and returns reply text. No audio over the bridge.
+
 ## Open questions
-- Deepgram from app vs via bridge (mirror of ws1 open question).
 - Avatar art direction — abstract orb vs stylized creature. (Lean: abstract, mood-driven orb; faster
   to build, less uncanny.)
