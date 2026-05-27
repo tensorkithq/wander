@@ -51,17 +51,19 @@ Inherits the original wand spec's "brass + black resin + glow" feel, translated 
 - **Trick buttons** — Hello / WiggleHips / Stretch / FingerHeart → `POST /trick`.
 - **Mode switcher** — Creature / Ghost / Hunt / Scanner / Music / Meditation → `POST /mode`.
 
-### Talk to Yugo (voice) — Deepgram is app-side
-- **Push-to-talk** → capture mic → **Deepgram streaming STT** → text → `POST /agent/say` on the
-  bridge (which routes it to DimOS agentic mode / OpenAI).
-- **Yugo replies** — the bridge returns reply text → **Deepgram Aura TTS** → playback (`expo-av`) +
-  on-screen **caption**. (All audio capture/STT/TTS happens in the app; the bridge carries text.)
+### Talk to Yugo (voice) — Deepgram STT in, ElevenLabs voice out (both app-side)
+- **Push-to-talk** → capture mic → **Deepgram streaming STT** (STT only) → text → `POST /agent/say`
+  on the bridge (which routes it to DimOS agentic mode / OpenAI).
+- **Yugo replies** — the bridge returns reply text → **ElevenLabs TTS** (Yugo's character voice) →
+  playback (`expo-av`) + on-screen **caption**. (All audio happens in the app; the bridge carries text.)
 - Signature lines surfaced as the avatar "speaks." Example flow: *"Yugo, you're safe"* → Yugo calms,
   *"Yugo feels calm now."*
 
 ### Wand mode (the phone as a sixth sense) — the differentiator
 - Read **magnetometer + accel/gyro + light** (`expo-sensors`).
-- **Sonify live**: field intensity → rising/eerie synth (Web Audio / `expo-av`), with **haptics**.
+- **Sonify live**: field intensity → rising/eerie tone via **local Web Audio synth** (must be
+  on-device for sub-100 ms response — never an API), with **haptics**. Triggered stings/ambient use
+  **ElevenLabs Sound Effects** (pre-generated/cached).
 - **POST `/sensor`** to the bridge so **Yugo reacts** (turns/flares toward the field).
 - **Wave gesture** (accel pattern) → trigger / change **music** (`POST /audio/play` + `/dance`).
 
@@ -77,7 +79,9 @@ Inherits the original wand spec's "brass + black resin + glow" feel, translated 
 ## Tech
 - Expo (React Native) — iOS / Android / web. `expo-sensors`, `expo-av`, `expo-haptics`.
 - WebSocket client for `/ws/state`; REST for commands. Connects to the laptop bridge over LAN /
-  Tailscale. Deepgram via app-side SDK or through the bridge (see ws1 open question).
+  Tailscale.
+- **Audio SDKs app-side:** **Deepgram** (STT only) + **ElevenLabs** (voice TTS + Sound Effects +
+  Music). Live wand tone = local **Web Audio**. App holds the Deepgram + ElevenLabs keys.
 
 ## Non-goals
 - No perception/compute on the phone (it's a client + a sensor node).
@@ -91,8 +95,9 @@ Inherits the original wand spec's "brass + black resin + glow" feel, translated 
 - UI visibly **feels** Yugo's mood; STOP is always one tap away.
 
 ## Resolved decisions (2026-05-28)
-- **Deepgram runs in the app** (STT + Aura TTS). The app holds the Deepgram key; the bridge gets
-  text via `POST /agent/say` and returns reply text. No audio over the bridge.
+- **Audio engines, all app-side:** **Deepgram = STT only**; **ElevenLabs = Yugo's voice (TTS) +
+  Sound Effects + Music**; **live wand tone = local Web Audio**. App holds the Deepgram + ElevenLabs
+  keys; the bridge gets text via `POST /agent/say` and returns reply text. No audio over the bridge.
 
 ## Open questions
 - Avatar art direction — abstract orb vs stylized creature. (Lean: abstract, mood-driven orb; faster

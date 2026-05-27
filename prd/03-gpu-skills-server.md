@@ -31,7 +31,9 @@ Until one of those bites, **don't build this** (YAGNI — design §11).
   behavior intent the laptop maps to gait/LED/audio.
 - `POST /converse {text, context}` → Yugo's spoken reply text (agentic loop; pairs with Deepgram
   TTS on the laptop/app side).
-- `POST /music {style, seed}` / `GET /ws/music` → generated audio/params streamed down.
+- `POST /music {style, seed}` / `GET /ws/music` → **ElevenLabs Music** generation (mood-driven),
+  streamed down to the app/laptop speaker. (Yugo's voice + SFX are ElevenLabs too, but app-side;
+  the server only generates the mood-tied music/ambient.)
 
 ## Hard rules (from the brain runbook + setup report)
 - **Never change torch** (pinned `2.4.1+cu124`); avoid `cuda`/`all` extras (xformers).

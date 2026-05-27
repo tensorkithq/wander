@@ -19,6 +19,10 @@ creature / performance.
 The **laptop FastAPI is the integration backbone.** The app is its client; the GPU server augments
 it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
 
+> **Laptop-only variant:** for Phase-1 / demo, see **`variant-laptop-only.md`** — a 2-tier collapse
+> (laptop + app, no GPU server) where the laptop hosts both the bridge and the DimOS-library brain.
+> The 3-tier set below is the scale-up path; build decoupled so going 3-tier is a move, not a rewrite.
+
 ## Architecture
 ```
   Go2 Air "Yugo" ──WebRTC LocalSTA (LAN)──┐
@@ -42,13 +46,15 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
   through Yugo" (the app/laptop speaker).
 - **WebRTC `LocalSTA` requires the laptop on the dog's LAN** → only the laptop holds the robot link.
 - **Transport = HTTP/WebSocket over Tailscale** (DDS dropped). Tailscale = secure net + SSH only.
-- **Voice = Deepgram, app-side** (streaming STT + Aura TTS) for low latency. The bridge carries
-  *text*, not audio.
+- **Audio stack:** **Deepgram** = STT (Yugo's ears; app-side, streaming). **ElevenLabs** = Yugo's
+  *voice* (TTS) + **Sound Effects** (ambient/stings/vocals) + **Music** (dance). Live-reactive **wand
+  sonification = local Web Audio** synth in the app (API audio is too slow for per-sweep response).
+  The bridge carries *text*, not audio.
 - **Brain = DimOS agentic mode with `OPENAI_API_KEY`** on the bridge/laptop (`dimos run
   unitree-go2-agentic`; NL→behavior; camera-first on the Air). Per `koolamusic/dimos` Go2 docs:
   https://github.com/koolamusic/dimos/blob/main/docs/platforms/quadruped/go2/index.md
-- Both are cloud APIs → low local load; needs network + API keys (`OPENAI_API_KEY` on bridge,
-  Deepgram key in the app).
+- Cloud APIs → low local load; keys: `OPENAI_API_KEY` (bridge), **Deepgram + ElevenLabs** (app).
+  Mood-driven music may be generated on the server brain (ElevenLabs) and streamed down.
 
 ## Naming
 - Robot dog = **Yugo**. App = **Yugo**. Repo = `tensorkithq/wander`.

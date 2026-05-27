@@ -55,11 +55,10 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
   Air — the blueprint's LiDAR/spatial-memory features are no-ops. Ref: `koolamusic/dimos` Go2 docs.
 - `POST /agent/say {text}` — feed a recognized utterance (from the **app's Deepgram STT**) into the
   agent (the programmatic equivalent of the doc's `humancli`); returns Yugo's **reply text** +
-  triggers behavior (move / trick / LED / mode). The **app** speaks the reply via Deepgram Aura TTS.
+  triggers behavior (move / trick / LED / mode). The **app** speaks the reply via **ElevenLabs TTS**.
 - `POST /say {text}` — force a scripted line as a behavior cue + caption (broadcast on `/ws/state`).
-  Audio playback is app-side; for headless laptop-speaker use the bridge MAY render via DimOS
-  `tts/node_openai` as a fallback.
-- **Voice capture + STT + TTS = app-side (Deepgram), NOT the bridge.** The bridge carries text.
+  Audio playback is app-side (ElevenLabs).
+- **Voice = app-side: Deepgram STT (ears) + ElevenLabs TTS (voice).** The bridge carries text, not audio.
 
 ### To add — wand ingest (the phone as a sensor node)
 - `POST /sensor {source, magnetometer, accel, light, gesture, ts}` — ingest the phone's readings.
@@ -67,8 +66,10 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
   (a `gesture:"wave"` starts/changes the track).
 
 ### To add — audio
-- `POST /audio/play {style|seed}` / `POST /audio/stop` — generative soundscape/music on the laptop
-  speaker (Yugo is mute on its own). Style also feeds `/dance`.
+- `POST /audio/play {style|seed}` / `POST /audio/stop` — trigger **ElevenLabs** soundscape/SFX/music
+  (Yugo is mute on its own; sound plays on the app or laptop speaker). Music style also feeds
+  `/dance`. Mood-driven music may be generated on the server brain and streamed; live-reactive wand
+  tone is **local Web Audio in the app**, never an API.
 
 ## Safety (hard requirements)
 - Deadman watchdog (exists) + velocity clamps (exists) on all motion paths, including `/trick`,
@@ -88,8 +89,9 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
 - Runs light on the M2 Pro (no torch); reconnects cleanly when `ROBOT_IP` changes.
 
 ## Resolved decisions (2026-05-28)
-- **Voice I/O = app-side Deepgram.** The app captures mic → Deepgram STT → POSTs text to
-  `/agent/say`; Yugo's reply text → Deepgram Aura TTS in the app. The bridge does **no** audio STT/TTS.
+- **Audio is app-side; bridge carries text.** Deepgram = **STT only** (app layer). ElevenLabs =
+  Yugo's voice (TTS) + Sound Effects + Music. Live wand tone = local Web Audio. App: mic → Deepgram
+  STT → `POST /agent/say` → reply text → ElevenLabs TTS. The bridge does **no** audio.
 - **Brain = DimOS agentic mode with `OPENAI_API_KEY`** (`dimos run unitree-go2-agentic`), running on
   the bridge/laptop. Phase 1 keeps it local; the GPU skills server (ws3) is an optional later offload.
 
