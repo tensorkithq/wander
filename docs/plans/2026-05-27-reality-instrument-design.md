@@ -142,3 +142,36 @@ companion audio + porthole`
 - Full 5-mode polish before v1 (build Creature+Hunt first).
 - The full exotic sensor pack up front (Phase 2, incrementally).
 - Any "useful"/productized framing — this is fun-first.
+
+## 12. Phase-1 cloud prototyping setup (RunPod)
+
+Time-boxed GPU rental for prototyping. **Expected cost: a few dollars/day** (per-hour billing;
+stop when idle), not the ~$20 ceiling.
+
+**GPU choice — rent a 4090/3090, NOT the 4000 Ada.** The 4000 Ada's only edge is 70 W / single-slot
+efficiency, which is irrelevant for hourly rental. On marketplaces a **RTX 4090 (24 GB)** is cheaper
+*and* faster *and* has more VRAM. Rates (May 2026): RTX 4090 ~$0.20–0.40/hr (RunPod Community / Vast),
+RTX 3090 ~$0.20–0.30/hr, RTX 4000 Ada $0.12 spot → ~$0.76 on-demand, L4 ~$0.40–0.70/hr.
+Vast.ai is usually cheapest; RunPod Community is the price/reliability sweet spot.
+
+**RunPod recipe:**
+1. **Pod** (not Serverless — Serverless has no interactive dev). Community Cloud → **RTX 4090**.
+2. **Template: PyTorch 2.8.0 (CUDA 12.8)** — torch + CUDA pre-baked, saves GPU-hours/disk.
+   Other templates (ComfyUI, vLLM, Axolotl, AI Toolkit, Diffusion Pipe) are off-target.
+3. **Attach a Network Volume** (persistent storage) → can stop the pod to kill GPU billing, and
+   survive spot reclaim without losing env/code.
+4. Add SSH public key; expose **TCP port 22** for direct SSH (VS Code / Cursor remote).
+5. Install **Tailscale in userspace mode** (`tailscaled --tun=userspace-networking`) — containers
+   lack `/dev/net/tun`. (A full GPU **VM** avoids this entirely if the container fight annoys.)
+6. **SSH over the tailnet IP** — same secure path the DDS traffic uses; sidesteps port-mapping.
+7. Scoped **`uv`** install of DimOS (perception/agents/web extras) on top of the base image.
+
+**Caveats:**
+- **Torch-version alignment:** DimOS may pin a torch version different from the image's 2.8.0 —
+  let the resolver reconcile / install against existing torch, don't bloat disk with two torch builds.
+- **Spot/interruptible is fine for prototyping** IF work lives on the Network Volume + committed to git.
+- **Pre-bake setup** (uv install + Tailscale) as a startup script so you don't pay GPU-hours to install.
+
+**Reminder — you may not need the cloud GPU for Phase 1 at all:** the M2 Pro laptop has MPS and is
+already in the loop; the cloud box becomes necessary mainly for real-time VLM/object-detection or
+running while away from the dog's network.
