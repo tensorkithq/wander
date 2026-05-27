@@ -148,11 +148,19 @@ companion audio + porthole`
 Time-boxed GPU rental for prototyping. **Expected cost: a few dollars/day** (per-hour billing;
 stop when idle), not the ~$20 ceiling.
 
-**GPU choice — rent a 4090/3090, NOT the 4000 Ada.** The 4000 Ada's only edge is 70 W / single-slot
-efficiency, which is irrelevant for hourly rental. On marketplaces a **RTX 4090 (24 GB)** is cheaper
-*and* faster *and* has more VRAM. Rates (May 2026): RTX 4090 ~$0.20–0.40/hr (RunPod Community / Vast),
-RTX 3090 ~$0.20–0.30/hr, RTX 4000 Ada $0.12 spot → ~$0.76 on-demand, L4 ~$0.40–0.70/hr.
-Vast.ai is usually cheapest; RunPod Community is the price/reliability sweet spot.
+**GPU choice — CHOSEN: RTX A5000 (24 GB) @ $0.27/hr on RunPod.** Best $/VRAM on the menu: 24 GB for
+$0.27, Ampere GA102 (~28 TFLOPS, 768 GB/s — ~2× the 4000 Ada's bandwidth), 48 GB RAM / 9 vCPU host
+(meets the ≥8 vCPU / ≥32 GB bar). 24 GB comfortably fits the Phase-1 perception stack with headroom
+for a small local LLM later. Note: the 4090 was **Unavailable** on RunPod at selection time.
+
+Caveat: A5000 is **Low availability / 1 max** — may take a retry to secure; once running, **stop to a
+Network Volume rather than terminate** so you don't lose the slot. **Fallback: A40 (48 GB, $0.44/hr,
+Medium stock)** if the A5000 can't be obtained.
+
+Reference rates seen (RunPod, May 2026): RTX A5000 24 GB $0.27 (chosen) · RTX 4000 Ada 20 GB $0.26
+(Low) · A40 48 GB $0.44 (Medium, fallback) · L4 24 GB $0.39 · RTX 3090 24 GB $0.46 · RTX 4090 24 GB
+$0.69 (Unavailable) · RTX PRO 4500 32 GB $0.74 (High stock, guaranteed-launch fallback). Skip
+48 GB+ workstation cards and H100/A100/B300 — overkill for perception.
 
 **RunPod recipe:**
 1. **Pod** (not Serverless — Serverless has no interactive dev). Community Cloud → **RTX 4090**.
