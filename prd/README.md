@@ -9,6 +9,18 @@ that turns invisible forces in a space into sound, light, motion, and personalit
 **talk to, play with, and hand a "wand" (the phone) to**. Not useful-first; an instrument / toy /
 creature / performance.
 
+## ★ Canonical architecture (2026-05-29): Body + Mind
+The chosen, current architecture is the **body/mind split** — supersedes the variants below:
+- **`architecture-body.md`** — a single light **local FastAPI** on the LAN computer: WebRTC to Yugo,
+  control, reflex, state, the app contract, and the agent loop. The app hooks this locally.
+- **`architecture-mind.md`** — all **intelligence in the cloud** (OpenAI reasoning, pluggable
+  perception, Deepgram/ElevenLabs voice, LanceDB memory), which the body delegates to.
+- **`../fastapi/openapi.yaml`** — the full route-by-route surface spec for the body.
+
+> **Body = I/O + control + fast loop (local). Mind = intelligence (cloud).** The workstream docs
+> below remain valid as detail (app = ws2; body refines ws1; mind refines ws3), but the canonical
+> deployment is body/mind, not the earlier 3-tier-vs-laptop-only framing.
+
 ## Workstreams (this PRD set)
 | # | Workstream | Doc | Role |
 |---|---|---|---|

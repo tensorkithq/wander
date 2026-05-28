@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-BRIDGE_DIR = Path(__file__).resolve().parent
+BRIDGE_DIR = Path(__file__).resolve().parent.parent / "fastapi"
 sys.path.insert(0, str(BRIDGE_DIR))
 os.environ["PYTHONPATH"] = str(BRIDGE_DIR) + os.pathsep + os.environ.get("PYTHONPATH", "")
 

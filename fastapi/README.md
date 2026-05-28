@@ -14,8 +14,10 @@ Runs inside this repo's `.venv` (where `dimos` + `unitree_webrtc_connect` are in
 | `validate_api.py` | No-auth connection validator — `curl /hello` → Yugo trick. Thin, no DimOS graph. |
 | `web_bridge.py` | `WebBridge` DimOS module — MJPEG camera out + `/cmd_vel` teleop in, deadman + clamps. |
 | `run.py` | Entrypoint: WebRTC connect (`--robot-ip`) + `WebBridge`. |
-| `smoke_bridge.py` | No-robot test harness for `WebBridge`. |
 | `static/debug.html` | Browser debug client. |
+
+Tests & utilities live outside this dir: no-robot harness `../scripts/smoke_bridge.py`,
+standalone robot utilities `../utils/go2_teleop.py` and `../utils/go2_trick.py`.
 
 ## Run (Yugo on the floor, ~2 m clear)
 ```bash

@@ -1,0 +1,1175 @@
+# =============================================================================
+# Yugo Body API — OpenAPI 3.1 contract for the local FastAPI hub ("the body")
+# -----------------------------------------------------------------------------
+# This file is the AUTHORITATIVE surface contract that the Yugo app (React
+# Native) and other LAN clients code against. It describes the body: a single
+# light FastAPI process on the dog's LAN that holds the WebRTC LocalSTA link to
+# Yugo (Go2 Air), executes all control LOCALLY, and DELEGATES every "think" step
+# to the cloud mind (OpenAI reasoning, perception, ElevenLabs voice/music).
+#
+# Body  = I/O + control + fast/reflex loop  (this API).
+# Mind  = intelligence; reached via /agent/say, perception sampling, audio cues.
+#
+# Each operation carries `x-execution: local | delegates-to-mind` and states in
+# its description whether it runs over WebRTC on the robot or calls the cloud.
+#
+# Source files this spec documents:
+#   validate_api.py  -> /healthz, /tricks, /trick/{name}, /hello, /stop  (port 8080)
+#   web_bridge.py    -> /healthz, /debug, /cmd_vel, /stop, /video_feed/color_image (port 5555)
+# Everything else is PLANNED (target surface per prd/architecture-body.md).
+# =============================================================================
+
+openapi: 3.1.0
+
+info:
+  title: Yugo Body API
+  version: 0.1.0
+  description: |
+    **The body** is Yugo's nervous system: a single light FastAPI on the dog's
+    LAN that owns the one WebRTC `LocalSTA` link to the Go2 Air, executes all
+    control locally and fast, serves the app, and runs the agent loop — but
+    **delegates every intelligence step to the mind (cloud)**.
+
+    - **Body (this API)** = robot I/O, local control, reflex/safety loop, state
+      aggregation, app contract.
+    - **Mind (cloud)** = LLM reasoning (OpenAI), perception (vision/detectors),
+      voice & music generation (ElevenLabs). The body carries *text*, not audio.
+
+    Routes are tagged into groups (control, telemetry, agent, sensor, audio,
+    system) and each operation declares `x-execution`:
+    `local` (runs over WebRTC on the robot) or `delegates-to-mind` (calls cloud).
+
+    ## No auth — LAN tool
+    This is a local LAN/Tailscale tool and ships with **no authentication** by
+    design. Do **not** expose its port to the public internet. An empty,
+    optional security scheme is declared (`security: [{}]`) purely to make the
+    "no auth required" contract explicit for code generators.
+
+    ## Three hard constraints (from live testing 2026-05-28/29)
+    1. **BalanceStand precondition.** Expressive `SPORT_CMD` moves (e.g.
+       `WiggleHips`) are *ignored* unless Yugo is upright. The body gates them
+       behind an auto-`BalanceStand`. `Hello` works from most states.
+    2. **The WebRTC data channel can drop** mid-session and does NOT self-heal.
+       `GET /healthz` MUST reflect the **live** channel state (not just the
+       initial handshake), and the body **auto-reconnects**.
+    3. **`ok` ≠ executed.** Publishing a `SPORT_CMD` returns success even if the
+       dog ignores it (no execution ack). Telemetry/state — not the publish
+       result — is the source of truth.
+
+    ## Degradation
+    If the mind/network is unreachable, the body keeps the reflex/deadman loop
+    and a safe local command set (stand/sit/stop) alive: a cloud blip never
+    strands Yugo mid-demo. `delegates-to-mind` routes may return `502`.
+  contact:
+    name: Yugo / dimos
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: validate_api.py — connection validator (default port 8080).
+  - url: http://localhost:5555
+    description: web_bridge.py — WebBridge camera + teleop bridge (default port 5555).
+
+# No auth: empty security requirement object => the API may be called with no
+# credentials. Declared at the document level so it applies to every operation.
+security:
+  - {}
+
+tags:
+  - name: system
+    description: Liveness, capability discovery, and connection health.
+  - name: control
+    description: |
+      Local motion & expression. Every route here EXECUTES ON THE ROBOT over the
+      WebRTC LocalSTA link. All motion paths are subject to the deadman watchdog
+      and velocity clamps. `POST /stop` cancels any running routine immediately.
+  - name: telemetry
+    description: |
+      Live state and media out of the body — the camera MJPEG stream and the
+      `/ws/state` WebSocket that drives the app's "aura".
+  - name: agent
+    description: |
+      Yugo's brain. These routes DELEGATE to the cloud mind (OpenAI), then apply
+      the returned behavior locally on the robot.
+  - name: sensor
+    description: |
+      Inbound sensor ingest — the phone acting as a "wand" (magnetometer / IMU /
+      light / gesture) to drive mood, music, and robot reactions.
+  - name: audio
+    description: |
+      Soundscape / SFX / music TRIGGERS. Audio is generated by the mind
+      (ElevenLabs) and played app/laptop-side — bytes never traverse the body.
+
+paths:
+
+  # ===========================================================================
+  # SYSTEM
+  # ===========================================================================
+  /healthz:
+    get:
+      tags: [system]
+      operationId: getHealthz
+      summary: Liveness + live WebRTC connection health
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (validate_api.py and web_bridge.py both expose this).
+
+        **What it does:** returns the body's liveness plus the **live** state of
+        the WebRTC link to Yugo. This is a read-only status probe and has **no
+        side effects** on the robot.
+
+        **Execution:** local. It inspects the in-process WebRTC connection /
+        data-channel state and the deadman timer; it does not call the cloud.
+
+        **Critical contract (hard constraint #2):** the data channel can drop
+        mid-session and does not self-heal, so `connected` / `channel` MUST
+        reflect the *current* channel state — not merely that the initial
+        handshake once succeeded. The body auto-reconnects in the background;
+        clients should poll this and treat motion routes as unavailable (`503`)
+        while `connected` is false.
+
+        - `last_cmd_age_s` is the age of the most recent `/cmd_vel`; if it
+          exceeds the deadman window (0.4 s) the publish loop is sending a zero
+          Twist (safe stop).
+        - `have_frame` indicates whether a camera frame has been received
+          (web_bridge only).
+
+        **Latency:** sub-millisecond (in-memory).
+
+        > Note: `validate_api.py` currently returns the minimal shape
+        > `{ok, robot_ip, connected}`; the canonical/target shape adds the live
+        > channel + deadman fields described by `HealthStatus`.
+      responses:
+        '200':
+          description: Body is alive. Inspect fields for live robot/channel state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              examples:
+                connected:
+                  summary: Channel up, recent command
+                  value:
+                    ok: true
+                    robot_ip: "192.168.203.75"
+                    connected: true
+                    channel: "open"
+                    have_frame: true
+                    last_cmd_age_s: 0.12
+                channel_dropped:
+                  summary: Handshake done but data channel dropped (auto-reconnecting)
+                  value:
+                    ok: true
+                    robot_ip: "192.168.203.75"
+                    connected: false
+                    channel: "closed"
+                    have_frame: true
+                    last_cmd_age_s: 3.4
+
+  /tricks:
+    get:
+      tags: [system]
+      operationId: getTricks
+      summary: List available SPORT_CMD move names
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (validate_api.py).
+
+        **What it does:** returns the sorted list of `SPORT_CMD` move names the
+        robot understands (e.g. `Hello`, `WiggleHips`, `Stretch`, `FingerHeart`,
+        `BalanceStand`, `RecoveryStand`, …). These are the valid values for the
+        `name` path parameter of `POST /trick/{name}`.
+
+        **Execution:** local — reads the static `SPORT_CMD` table; no robot
+        traffic, no side effects.
+
+        **Latency:** sub-millisecond.
+      responses:
+        '200':
+          description: The set of known move names.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tricks]
+                properties:
+                  tricks:
+                    type: array
+                    items: { type: string }
+              examples:
+                sample:
+                  value:
+                    tricks: ["BalanceStand", "FingerHeart", "Hello", "RecoveryStand", "Stretch", "WiggleHips"]
+
+  # ===========================================================================
+  # CONTROL  (all x-execution: local — runs on the robot over WebRTC)
+  # ===========================================================================
+  /cmd_vel:
+    post:
+      tags: [control]
+      operationId: postCmdVel
+      summary: Velocity teleop (clamped, deadman-guarded)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (web_bridge.py).
+
+        **What it does:** sets the target body velocity. The body re-publishes
+        the latest command to the robot's `cmd_vel` at ~20 Hz.
+
+        **Execution:** local — Twist published over WebRTC LocalSTA.
+
+        **Side effects:** Yugo MOVES. Ensure clear space.
+
+        **Safety:**
+        - **Clamps:** `vx`/`vy` to ±0.6 m/s, `wz` to ±1.2 rad/s. Out-of-range
+          values are clamped, not rejected.
+        - **Deadman watchdog:** if no `/cmd_vel` arrives within **0.4 s** the
+          publish loop sends a zero Twist (auto-stop). Clients must send at a
+          steady cadence (e.g. 10–20 Hz) to keep moving.
+
+        **Latency:** LAN-local, a few ms to enqueue; motion applied on the next
+        publish tick.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Twist'
+            examples:
+              forward:
+                summary: Drive forward, gentle left turn
+                value: { vx: 0.3, vy: 0.0, wz: 0.4 }
+      responses:
+        '200':
+          description: Command accepted (values clamped server-side).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '400':
+          description: Malformed JSON body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad: { value: { ok: false, error: "bad json" } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /stop:
+    post:
+      tags: [control]
+      operationId: postStop
+      summary: Global stop → safe stance
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (web_bridge.py: zero velocity; validate_api.py:
+        `RecoveryStand` → `BalanceStand`).
+
+        **What it does:** the global panic/stop. In the WebBridge it zeroes the
+        velocity command immediately; in the validator it issues
+        `RecoveryStand` then `BalanceStand` to bring the dog to a safe upright
+        stance. It also cancels any running routine (dance/breathe).
+
+        **Execution:** local over WebRTC.
+
+        **Side effects:** Yugo stops moving / returns to a stable stance.
+
+        **Safety:** this is the always-available safety command and should keep
+        working even when the mind is unreachable.
+
+        **Latency:** immediate (next publish tick).
+      responses:
+        '200':
+          description: Stop applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /trick/{name}:
+    post:
+      tags: [control]
+      operationId: postTrick
+      summary: Fire a SPORT_CMD move
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (validate_api.py — also accepts GET).
+
+        **What it does:** publishes a single `SPORT_CMD` move (looked up by
+        `name` against the `/tricks` table) to `RTC_TOPIC["SPORT_MOD"]`.
+
+        **Execution:** local over WebRTC.
+
+        **Side effects:** Yugo performs the move (large body motion). Clear space.
+
+        **Safety / preconditions (hard constraint #1):** expressive moves such as
+        `WiggleHips` are **ignored unless Yugo is upright**. The body gates these
+        behind an auto-`BalanceStand` precondition. `Hello` works from most
+        states. Tricks should additionally be gated behind a client
+        "clear-space" acknowledgement.
+
+        **`ok` ≠ executed (hard constraint #3):** a `200 {ok:true}` means the
+        command was **PUBLISHED**, not that the dog **EXECUTED** it — there is no
+        execution ack. Confirm via `/ws/state` telemetry, not this response.
+
+        **Latency:** publish is a few ms LAN-local; physical execution takes
+        as long as the move (~1–3 s).
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Move name; must be one of `GET /tricks`.
+          schema: { type: string }
+          examples:
+            wave: { value: "Hello" }
+            wiggle: { value: "WiggleHips" }
+      responses:
+        '200':
+          description: Move PUBLISHED (not necessarily executed — see description).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published:
+                  value: { ok: true, move: "WiggleHips", api_id: 1033 }
+        '404':
+          $ref: '#/components/responses/UnknownMove'
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /led:
+    post:
+      tags: [control]
+      operationId: postLed
+      summary: Set front-lamp color / effect (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** sets Yugo's front lamp via the VUI topic — a solid
+        mood `color` or a named `effect` (e.g. a Ghost-mode strobe).
+
+        **Execution:** local over WebRTC (VUI topic publish).
+
+        **Side effects:** changes the front-lamp output only; no motion.
+
+        **Safety:** no motion; safe at any time. Strobe effects should be used
+        sparingly (photosensitivity).
+
+        **Latency:** LAN-local, a few ms.
+
+        Provide either `color` or `effect`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                color:
+                  type: string
+                  description: CSS/hex color, e.g. "#33ccff" or "red".
+                effect:
+                  type: string
+                  description: Named effect, e.g. "strobe", "breathe", "off".
+              anyOf:
+                - required: [color]
+                - required: [effect]
+            examples:
+              moodColor: { value: { color: "#33ccff" } }
+              ghostStrobe: { value: { effect: "strobe" } }
+      responses:
+        '200':
+          description: Lamp updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /mode:
+    post:
+      tags: [control]
+      operationId: postMode
+      summary: Set the active behavior mode (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** sets the body's active behavior mode, which colors how
+        Yugo reacts to wand/agent input (LED palette, motion tendencies, music
+        coupling). The mode is reflected in `/ws/state`.
+
+        **Execution:** local — a body-side state switch that conditions
+        subsequent local behavior (may publish LED/posture changes over WebRTC).
+
+        **Side effects:** may change lamp/posture immediately depending on mode;
+        does not by itself drive locomotion.
+
+        **Safety:** mode change alone does not move the dog; motion still flows
+        through the clamped/deadman-guarded paths.
+
+        **Latency:** LAN-local, a few ms.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [creature, ghost, hunt, scanner, music, meditation]
+            examples:
+              ghost: { value: { mode: "ghost" } }
+      responses:
+        '200':
+          description: Mode set.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/OkResponse'
+                  - type: object
+                    properties:
+                      mode:
+                        type: string
+                        enum: [creature, ghost, hunt, scanner, music, meditation]
+              examples:
+                ok: { value: { ok: true, mode: "ghost" } }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /dance:
+    post:
+      tags: [control]
+      operationId: postDance
+      summary: Beat-synced choreography (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** starts a beat-synced pose/height choreography (or a
+        `SPORT_CMD` sequence) at the given `bpm` and `style`, so "Yugo dances to
+        the music." Runs as a routine on the body until `/stop` (or another
+        routine) is issued.
+
+        **Execution:** local — sequences poses/heights/tricks over WebRTC,
+        synchronized to the beat the body holds.
+
+        **Side effects:** sustained, rhythmic body motion. Requires clear space.
+
+        **Safety:** all motion goes through the velocity clamps; `POST /stop`
+        cancels the routine immediately. Expressive sub-moves are gated behind
+        the BalanceStand precondition (constraint #1).
+
+        **Latency:** starts within a beat; LAN-local trigger.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bpm:
+                  type: number
+                  description: Beats per minute to sync to.
+                  minimum: 20
+                  maximum: 220
+                style:
+                  type: string
+                  description: Choreography style, e.g. "bounce", "sway", "pop".
+            examples:
+              bounce: { value: { bpm: 120, style: "bounce" } }
+      responses:
+        '200':
+          description: Dance routine started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /breathe:
+    post:
+      tags: [control]
+      operationId: postBreathe
+      summary: Slow body-height oscillation for meditation (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** toggles a slow, calm body-height oscillation
+        ("breathing") used in meditation mode. `on:true` starts it at `rate`
+        cycles/min; `on:false` stops it.
+
+        **Execution:** local — oscillates body height over WebRTC.
+
+        **Side effects:** gentle, low-amplitude vertical body motion only; no
+        locomotion.
+
+        **Safety:** low-amplitude; clamped; `POST /stop` ends it. Requires an
+        upright stance (BalanceStand precondition).
+
+        **Latency:** LAN-local; oscillation cadence set by `rate`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [on]
+              properties:
+                on:
+                  type: boolean
+                  description: Start (true) or stop (false) the breathing motion.
+                rate:
+                  type: number
+                  description: Cycles per minute (breaths/min). Ignored when on=false.
+                  minimum: 1
+                  maximum: 30
+            examples:
+              start: { value: { on: true, rate: 6 } }
+              stop: { value: { on: false } }
+      responses:
+        '200':
+          description: Breathing toggled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  # ===========================================================================
+  # TELEMETRY
+  # ===========================================================================
+  /video_feed/color_image:
+    get:
+      tags: [telemetry]
+      operationId: getVideoFeedColorImage
+      summary: MJPEG camera stream
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (web_bridge.py).
+
+        **What it does:** serves the robot's color camera as a continuous
+        `multipart/x-mixed-replace` MJPEG stream (boundary `frame`). Open it in
+        an `<img>` tag or an MJPEG-capable player.
+
+        **Execution:** local — frames arrive over WebRTC, are JPEG-encoded by
+        the body, and pushed to the client. The body also samples frames
+        (~1–3 fps) to send to the mind for perception, but that is internal and
+        not part of this stream.
+
+        **Side effects:** none on the robot (read-only).
+
+        **Safety:** read-only.
+
+        **Latency:** near real-time; frames pushed at up to ~30 fps. Before the
+        first frame arrives the stream yields nothing (check `have_frame` on
+        `/healthz`).
+      responses:
+        '200':
+          description: An open MJPEG multipart stream.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+                description: |
+                  Repeating `--frame` parts, each `Content-Type: image/jpeg`
+                  followed by the JPEG bytes.
+
+  /ws/state:
+    get:
+      tags: [telemetry]
+      operationId: getWsState
+      summary: Live state WebSocket (~10–20 Hz push)
+      x-execution: local
+      description: |
+        **PLANNED.** Documented here as an operation; this endpoint is a
+        **WebSocket upgrade**, not a plain HTTP GET. Connect with `ws://` (e.g.
+        `ws://localhost:5555/ws/state`).
+
+        **What it does:** after the upgrade, the body **pushes** an aggregated
+        state frame at ~10–20 Hz. This drives the app's "aura". The payload
+        merges robot telemetry with the latest results returned by the mind
+        (mood/detections).
+
+        Each pushed message conforms to `StateFrame`:
+        `battery`, `pose`/`imu`, `mode`, `mood {scalar,label,color}`,
+        `detections [{label,bbox,confidence}]`, `person_count`, `audio_level`.
+
+        **Execution:** local — the body aggregates and pushes; perception fields
+        originate from the mind but are delivered here by the body.
+
+        **Side effects:** none (read-only stream).
+
+        **Safety:** read-only.
+
+        **Latency:** push cadence ~10–20 Hz; mind-sourced fields (detections,
+        mood) update at the perception tier's slower rate.
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket established; server pushes `StateFrame` messages.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StateFrame' }
+              examples:
+                frame:
+                  value:
+                    battery: 0.82
+                    pose: { x: 0.0, y: 0.0, z: 0.31, roll: 0.01, pitch: -0.02, yaw: 1.57 }
+                    imu: { ax: 0.0, ay: 0.0, az: 9.81, gx: 0.0, gy: 0.0, gz: 0.0 }
+                    mode: "creature"
+                    mood: { scalar: 0.7, label: "curious", color: "#ffcc44" }
+                    detections:
+                      - { label: "person", bbox: [120, 60, 240, 380], confidence: 0.91 }
+                    person_count: 1
+                    audio_level: 0.34
+
+  # ===========================================================================
+  # AGENT  (delegates-to-mind)
+  # ===========================================================================
+  /agent/say:
+    post:
+      tags: [agent]
+      operationId: postAgentSay
+      summary: Forward an utterance to the cloud agent (PLANNED)
+      x-execution: delegates-to-mind
+      description: |
+        **PLANNED.**
+
+        **What it does:** forwards a recognized utterance `text` (from the app's
+        Deepgram STT) plus context (recent detections, mood, state) to the cloud
+        agent (OpenAI). The mind returns a short reply line and a behavior
+        intent; the body then **applies that behavior locally** (move / trick /
+        LED / mode) and returns `{reply_text, behavior}`.
+
+        **Execution:** **delegates-to-mind** for the reasoning, then **local**
+        for the resulting behavior over WebRTC. The app speaks `reply_text` via
+        ElevenLabs TTS — this route returns text only, never audio.
+
+        **Side effects:** the returned behavior may MOVE Yugo or change its
+        lamp/mode. Same safety gating applies (clamps, deadman, BalanceStand,
+        clear-space).
+
+        **Safety / degradation:** if the mind is unreachable, returns `502`; the
+        body stays safe (reflex/deadman keep running) and falls back to the safe
+        local command set.
+
+        **Latency:** dominated by the cloud round-trip (~0.5–3 s depending on
+        region/model); the mind streams so first words come back quickly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: The recognized utterance to feed the agent.
+            examples:
+              greet: { value: { text: "Yugo, say hi to everyone" } }
+      responses:
+        '200':
+          description: Agent reply + applied behavior.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentReply' }
+              examples:
+                reply:
+                  value:
+                    reply_text: "Yugo waves a happy hello."
+                    behavior: { type: "trick", name: "Hello" }
+        '502':
+          $ref: '#/components/responses/MindUnreachable'
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /say:
+    post:
+      tags: [agent]
+      operationId: postSay
+      summary: Broadcast a scripted caption on /ws/state (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** forces a scripted line as a caption + behavior cue,
+        broadcast on the `/ws/state` stream. Unlike `/agent/say` this does **no**
+        reasoning and produces **no audio** — audio playback is app-side
+        (ElevenLabs). Use it for canned lines.
+
+        **Execution:** local — no cloud call; the body just broadcasts the
+        caption (and may apply an associated local cue).
+
+        **Side effects:** updates the caption seen by `/ws/state` subscribers;
+        no motion unless a cue is attached.
+
+        **Safety:** no audio, no required motion.
+
+        **Latency:** LAN-local, a few ms.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: The caption/line to broadcast.
+            examples:
+              caption: { value: { text: "Yugo is watching." } }
+      responses:
+        '200':
+          description: Caption broadcast.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+
+  # ===========================================================================
+  # SENSOR
+  # ===========================================================================
+  /sensor:
+    post:
+      tags: [sensor]
+      operationId: postSensor
+      summary: Ingest phone "wand" sensor readings (PLANNED)
+      x-execution: local
+      description: |
+        **PLANNED.**
+
+        **What it does:** ingests a reading from the phone acting as a "wand" —
+        magnetometer, accelerometer, ambient light, and an optional discrete
+        gesture, with a client timestamp. The body uses these to drive
+        sonification cues, mood/mode reactions (Yugo turns/flares toward a
+        magnetic field), and music triggers (e.g. `gesture:"wave"` starts or
+        changes the track).
+
+        **Execution:** local — the body maps readings to local reactions; some
+        reactions (motion/LED) are published over WebRTC, and a music gesture may
+        in turn trigger a `delegates-to-mind` audio cue.
+
+        **Side effects:** may cause Yugo to turn/flare or update mood; may start
+        music. Motion still flows through the clamped/deadman paths.
+
+        **Safety:** mapped reactions are bounded by the same clamps; `/stop`
+        overrides.
+
+        **Latency:** LAN-local; intended to be sent at a steady stream rate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SensorReading' }
+            examples:
+              wave:
+                summary: A "wave" gesture with field + light
+                value:
+                  source: "phone-wand"
+                  magnetometer: { x: 12.3, y: -4.1, z: 40.2 }
+                  accel: { x: 0.1, y: 0.0, z: 9.8 }
+                  light: 320
+                  gesture: "wave"
+                  ts: 1716960000.123
+      responses:
+        '200':
+          description: Reading ingested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # ===========================================================================
+  # AUDIO  (delegates-to-mind)
+  # ===========================================================================
+  /audio/play:
+    post:
+      tags: [audio]
+      operationId: postAudioPlay
+      summary: Trigger an ElevenLabs soundscape/SFX/music (PLANNED)
+      x-execution: delegates-to-mind
+      description: |
+        **PLANNED.**
+
+        **What it does:** triggers a soundscape / SFX / music cue by `style` or
+        `seed`. The actual audio is **generated mind-side (ElevenLabs)** and
+        **played app/laptop-side** — audio bytes never traverse the body. The
+        music `style` may also feed `/dance` so motion matches the track.
+
+        **Important:** the **live wand tone** is local Web Audio in the app and
+        is NOT this route. This route is for generated soundscape/SFX/music only.
+
+        **Execution:** **delegates-to-mind** — the body relays the cue to the
+        mind / app; it does not synthesize or stream audio itself.
+
+        **Side effects:** starts/changes playback on the app or laptop speaker;
+        no robot motion (though it may couple to `/dance`).
+
+        **Safety:** no motion; if the mind is unreachable, returns `502`.
+
+        **Latency:** generation/stream start is mind-side (seconds for music);
+        the trigger itself is LAN-local. Provide either `style` or `seed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                style:
+                  type: string
+                  description: Named music/soundscape style, e.g. "ambient", "dnb".
+                seed:
+                  type: integer
+                  description: Generation seed for reproducibility.
+              anyOf:
+                - required: [style]
+                - required: [seed]
+            examples:
+              ambient: { value: { style: "ambient" } }
+              seeded: { value: { style: "dnb", seed: 42 } }
+      responses:
+        '200':
+          description: Audio cue accepted (generation/playback proceeds mind/app-side).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '502':
+          $ref: '#/components/responses/MindUnreachable'
+
+  /audio/stop:
+    post:
+      tags: [audio]
+      operationId: postAudioStop
+      summary: Stop the current soundscape/music (PLANNED)
+      x-execution: delegates-to-mind
+      description: |
+        **PLANNED.**
+
+        **What it does:** stops the current mind-generated soundscape/SFX/music
+        playback. Does not affect the app's local Web Audio wand tone.
+
+        **Execution:** **delegates-to-mind** — relays the stop to the mind/app
+        playback layer.
+
+        **Side effects:** halts audio playback app/laptop-side; no robot motion.
+
+        **Safety:** no motion; `502` if the mind is unreachable.
+
+        **Latency:** LAN-local trigger; playback stops promptly app-side.
+      responses:
+        '200':
+          description: Audio stop accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+              examples:
+                ok: { value: { ok: true } }
+        '502':
+          $ref: '#/components/responses/MindUnreachable'
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+components:
+
+  # ---- Reusable error / status responses -----------------------------------
+  responses:
+    RobotNotConnected:
+      description: |
+        503 — the robot or the WebRTC data channel is not connected. Per hard
+        constraint #2 this reflects the **live** channel state; the body is
+        auto-reconnecting. Poll `/healthz` and retry once `connected` is true.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            notConnected:
+              value: { ok: false, error: "robot not connected (ROBOT_IP=192.168.203.75)" }
+    UnknownMove:
+      description: 404 — the requested move name is not in the SPORT_CMD table.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            unknown:
+              value: { ok: false, error: "unknown move 'Backflip' — see GET /tricks" }
+    MindUnreachable:
+      description: |
+        502 — the cloud mind is unreachable (network/provider error). The body
+        remains safe (reflex/deadman + safe local command set). Retry later.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            mindDown:
+              value: { ok: false, error: "mind unreachable" }
+    ValidationError:
+      description: 422 — request body failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            invalid:
+              value: { ok: false, error: "invalid mode 'sleepy'" }
+
+  # ---- Schemas -------------------------------------------------------------
+  schemas:
+
+    OkResponse:
+      type: object
+      description: Generic success acknowledgement.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+
+    Error:
+      type: object
+      description: Standard error envelope.
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: string
+          description: Human-readable error message.
+
+    HealthStatus:
+      type: object
+      description: |
+        Liveness plus the LIVE WebRTC/robot state. `connected` and `channel`
+        MUST reflect the current data-channel state, not just the initial
+        handshake (hard constraint #2).
+      required: [ok, connected]
+      properties:
+        ok:
+          type: boolean
+          description: The body process is alive.
+        robot_ip:
+          type: string
+          description: The configured ROBOT_IP (DHCP — re-discovered per session).
+        connected:
+          type: boolean
+          description: Live WebRTC connection state to Yugo.
+        channel:
+          type: string
+          enum: [open, connecting, closed]
+          description: Live WebRTC data-channel state.
+        have_frame:
+          type: boolean
+          description: Whether at least one camera frame has been received (web_bridge).
+        last_cmd_age_s:
+          type: [number, "null"]
+          description: |
+            Seconds since the last `/cmd_vel`. Null if none yet. If it exceeds
+            the deadman window (0.4 s) the body is publishing a zero Twist.
+
+    Twist:
+      type: object
+      description: |
+        Body velocity command. `vx`/`vy` are linear m/s (clamped ±0.6),
+        `wz` is yaw rate rad/s (clamped ±1.2). Missing fields default to 0.
+      properties:
+        vx:
+          type: number
+          description: Forward (+) / back (-) linear velocity, m/s. Clamped to ±0.6.
+          default: 0.0
+        vy:
+          type: number
+          description: Left (+) / right (-) strafe velocity, m/s. Clamped to ±0.6.
+          default: 0.0
+        wz:
+          type: number
+          description: Yaw rate (CCW +), rad/s. Clamped to ±1.2.
+          default: 0.0
+
+    TrickResult:
+      type: object
+      description: |
+        Result of publishing a SPORT_CMD move. `ok:true` means PUBLISHED, NOT
+        executed (hard constraint #3) — there is no execution ack.
+      required: [ok, move]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        move:
+          type: string
+          description: The move name that was published.
+        api_id:
+          type: integer
+          description: The numeric SPORT_CMD api_id published to RTC_TOPIC["SPORT_MOD"].
+
+    Vector3:
+      type: object
+      description: A 3-axis vector.
+      required: [x, y, z]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        z: { type: number }
+
+    MoodState:
+      type: object
+      description: Aggregated mood used to drive the app's aura and LED color.
+      required: [scalar, label, color]
+      properties:
+        scalar:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Mood intensity / valence, 0..1.
+        label:
+          type: string
+          description: Human-readable mood label, e.g. "curious".
+        color:
+          type: string
+          description: Hex color associated with the mood, e.g. "#ffcc44".
+
+    Detection:
+      type: object
+      description: A single perception detection (from the mind, delivered via the body).
+      required: [label, bbox, confidence]
+      properties:
+        label:
+          type: string
+          description: Class label, e.g. "person".
+        bbox:
+          type: array
+          description: Bounding box [x, y, w, h] in pixels.
+          items: { type: number }
+          minItems: 4
+          maxItems: 4
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    StateFrame:
+      type: object
+      description: |
+        One push frame on the `/ws/state` WebSocket (~10–20 Hz). Merges robot
+        telemetry with mind-sourced perception/mood.
+      properties:
+        battery:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Battery fraction, 0..1.
+        pose:
+          type: object
+          description: Estimated body pose.
+          properties:
+            x: { type: number }
+            y: { type: number }
+            z: { type: number }
+            roll: { type: number }
+            pitch: { type: number }
+            yaw: { type: number }
+        imu:
+          type: object
+          description: IMU readings (linear accel a*, angular rate g*).
+          properties:
+            ax: { type: number }
+            ay: { type: number }
+            az: { type: number }
+            gx: { type: number }
+            gy: { type: number }
+            gz: { type: number }
+        mode:
+          type: string
+          enum: [creature, ghost, hunt, scanner, music, meditation]
+        mood:
+          $ref: '#/components/schemas/MoodState'
+        detections:
+          type: array
+          items: { $ref: '#/components/schemas/Detection' }
+        person_count:
+          type: integer
+          minimum: 0
+        audio_level:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Normalized ambient audio level, 0..1.
+
+    SensorReading:
+      type: object
+      description: A phone "wand" sensor reading.
+      required: [source, ts]
+      properties:
+        source:
+          type: string
+          description: Identifier of the sending node, e.g. "phone-wand".
+        magnetometer:
+          allOf:
+            - $ref: '#/components/schemas/Vector3'
+          description: Magnetometer reading (µT).
+        accel:
+          allOf:
+            - $ref: '#/components/schemas/Vector3'
+          description: Accelerometer reading (m/s²).
+        light:
+          type: number
+          description: Ambient light level (lux).
+        gesture:
+          type: string
+          description: Optional discrete gesture, e.g. "wave", "flick", "hold".
+        ts:
+          type: number
+          description: Client timestamp (epoch seconds, float).
+
+    AgentReply:
+      type: object
+      description: |
+        Reply from the cloud agent plus the behavior the body applied locally.
+      required: [reply_text]
+      properties:
+        reply_text:
+          type: string
+          description: Short, third-person Yugo line for the app to speak (TTS).
+        behavior:
+          type: object
+          description: The behavior intent the body executed.
+          properties:
+            type:
+              type: string
+              enum: [move, trick, led, mode, none]
+            name:
+              type: string
+              description: Move/trick name, mode name, or LED color/effect.
+            params:
+              type: object
+              additionalProperties: true
+              description: Optional extra parameters for the behavior.
