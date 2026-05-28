@@ -2,7 +2,7 @@
 # The IP is DHCP on muShanghaiHub — re-discover with `dimos go2tool discover`
 # if it moves, or override at runtime with the ROBOT_IP env var.
 robot:
-  ip: "192.168.203.75"
+  ip: "192.168.202.107"
   connect_timeout: 25      # seconds to wait for the WebRTC channel to come up
 
 motion:
