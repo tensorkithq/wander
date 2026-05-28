@@ -1,0 +1,13 @@
+diff --git a/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt b/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
+index 0cd90f4741508a95a63198574228c244ad41afd8..4731e1a1528a2de495cc2ae3156c813b64ec6832 100644
+--- a/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
++++ b/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
+@@ -206,7 +206,7 @@ abstract class MenuViewManagerBase : ReactClippingViewManager<MenuView>() {
+ 
+   @ReactProp(name = ViewProps.OVERFLOW)
+   fun setOverflow(view: ReactViewGroup, overflow: String?) {
+-    view.overflow = overflow
++    view.setOverflow(overflow)
+   }
+ 
+   @ReactProp(name = "backfaceVisibility")

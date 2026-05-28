@@ -1,0 +1,143 @@
+diff --git a/build/src/start/interface/commandsTable.js b/build/src/start/interface/commandsTable.js
+index 6eecd2607cb4d508cda5b2a9f4f0b12e3d0491a9..05311545f36a6d6b865647145b64a9221eff4ffa 100644
+--- a/build/src/start/interface/commandsTable.js
++++ b/build/src/start/interface/commandsTable.js
+@@ -125,24 +125,8 @@ function printUsage(options, { verbose }) {
+     const switchMsg = `switch to ${options.devClient === false ? 'development build' : 'Expo Go'}`;
+     const target = options.devClient === false ? `Expo Go` : 'development build';
+     _log.log();
+-    _log.log(printItem((0, _chalk().default)`Using {cyan ${target}}`));
+     if (verbose) {
+         logCommandsTable([
+-            {
+-                key: 's',
+-                msg: switchMsg
+-            },
+-            {},
+-            {
+-                key: 'a',
+-                msg: 'open Android',
+-                disabled: isAndroidDisabled
+-            },
+-            {
+-                key: 'shift+a',
+-                msg: 'select an Android device or emulator',
+-                disabled: isAndroidDisabled
+-            },
+             isMac && {
+                 key: 'i',
+                 msg: 'open iOS simulator',
+@@ -153,28 +137,10 @@ function printUsage(options, { verbose }) {
+                 msg: 'select an iOS simulator',
+                 disabled: isIosDisabled
+             },
+-            {
+-                key: 'w',
+-                msg: 'open web',
+-                disabled: isWebDisable
+-            },
+-            {},
+             {
+                 key: 'r',
+                 msg: 'reload app'
+             },
+-            !!options.isWebSocketsEnabled && {
+-                key: 'j',
+-                msg: 'open debugger'
+-            },
+-            !!options.isWebSocketsEnabled && {
+-                key: 'm',
+-                msg: 'toggle menu'
+-            },
+-            !!options.isWebSocketsEnabled && {
+-                key: 'shift+m',
+-                msg: 'more tools'
+-            },
+             {
+                 key: 'o',
+                 msg: 'open project code in your editor'
+@@ -187,26 +153,11 @@ function printUsage(options, { verbose }) {
+         ]);
+     } else {
+         logCommandsTable([
+-            {
+-                key: 's',
+-                msg: switchMsg
+-            },
+-            {},
+-            {
+-                key: 'a',
+-                msg: 'open Android',
+-                disabled: isAndroidDisabled
+-            },
+             isMac && {
+                 key: 'i',
+                 msg: 'open iOS simulator',
+                 disabled: isIosDisabled
+             },
+-            {
+-                key: 'w',
+-                msg: 'open web',
+-                disabled: isWebDisable
+-            },
+             {},
+             {
+                 key: 'j',
+@@ -216,14 +167,6 @@ function printUsage(options, { verbose }) {
+                 key: 'r',
+                 msg: 'reload app'
+             },
+-            !!options.isWebSocketsEnabled && {
+-                key: 'm',
+-                msg: 'toggle menu'
+-            },
+-            !!options.isWebSocketsEnabled && {
+-                key: 'shift+m',
+-                msg: 'more tools'
+-            },
+             {
+                 key: 'o',
+                 msg: 'open project code in your editor'
+diff --git a/build/src/start/interface/interactiveActions.js b/build/src/start/interface/interactiveActions.js
+index 1604ed48727edb0db19c9e7b030134794c02651d..f5ddad4721561d550a75732dcf1a4420f79c81d2 100644
+--- a/build/src/start/interface/interactiveActions.js
++++ b/build/src/start/interface/interactiveActions.js
+@@ -95,7 +95,7 @@ class DevServerManagerActions {
+                 _log.log((0, _commandsTable.printItem)((0, _chalk().default)`Metro waiting on {underline ${nativeRuntimeUrl}}`));
+                 if (options.devClient === false) {
+                     // TODO: if development build, change this message!
+-                    _log.log((0, _commandsTable.printItem)('Scan the QR code above with Expo Go (Android) or the Camera app (iOS)'));
++                    _log.log((0, _commandsTable.printItem)('Scan the QR code above with Camera app'));
+                 } else {
+                     _log.log((0, _commandsTable.printItem)('Scan the QR code above to open the project in a development build. ' + (0, _link.learnMore)('https://expo.fyi/start')));
+                 }
+@@ -111,16 +111,6 @@ class DevServerManagerActions {
+                 }
+             }
+         }
+-        if ((_this_options_platforms = this.options.platforms) == null ? void 0 : _this_options_platforms.includes('web')) {
+-            const webDevServer = this.devServerManager.getWebDevServer();
+-            const webUrl = webDevServer == null ? void 0 : webDevServer.getDevServerUrl({
+-                hostType: 'localhost'
+-            });
+-            if (webUrl) {
+-                _log.log();
+-                _log.log((0, _commandsTable.printItem)((0, _chalk().default)`Web is waiting on {underline ${webUrl}}`));
+-            }
+-        }
+         (0, _commandsTable.printUsage)(options, {
+             verbose: false
+         });
+diff --git a/build/src/start/server/BundlerDevServer.js b/build/src/start/server/BundlerDevServer.js
+index c0ebf7ed202912554dc4118f3cca1fc0d8067bc7..447a16bb7ffb23d28a8fc08d2dafa28d04065f50 100644
+--- a/build/src/start/server/BundlerDevServer.js
++++ b/build/src/start/server/BundlerDevServer.js
+@@ -277,7 +277,7 @@ class BundlerDevServer {
+     getNativeRuntimeUrl(opts = {}) {
+         return this.isDevClient ? this.getUrlCreator().constructDevClientUrl(opts) ?? this.getDevServerUrl() : this.getUrlCreator().constructUrl({
+             ...opts,
+-            scheme: 'exp'
++            scheme: 'vibecode'
+         });
+     }
+     /** Get the URL for the running instance of the dev server. */ getDevServerUrl(options = {}) {

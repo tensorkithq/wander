@@ -1,0 +1,905 @@
+diff --git a/Libraries/Core/ExceptionsManager.js b/Libraries/Core/ExceptionsManager.js
+index cbf854c..285e2f1 100644
+--- a/Libraries/Core/ExceptionsManager.js
++++ b/Libraries/Core/ExceptionsManager.js
+@@ -12,6 +12,8 @@
+ 
+ import type {ExtendedError} from './ExtendedError';
+ import type {ExceptionData} from './NativeExceptionsManager';
++import LogBoxLog from '../LogBox/Data/LogBoxLog';
++import { Platform } from 'react-native';
+ 
+ export class SyntheticError extends Error {
+   name: string = '';
+@@ -53,6 +55,85 @@ function preprocessException(data: ExceptionData): ExceptionData {
+   return data;
+ }
+ 
++function formatStack(stack: [any]) {
++  return stack.map((item) => {
++    const isComponentStack = !!item.fileName;
++    if (isComponentStack) {
++      return `
++      <${item.content}/>
++      ${item.fileName}:${item.location.row}:${item.location.column}`
++    } else {
++      return `
++      ${item.methodName}
++      ${item.file}:${item.lineNumber}:${item.column}`
++    }
++  }).join('\n');
++}
++function reportExceptionToNative(data: ExceptionData, e: ExtendedError) {
++  const temp = {
++    ...data,
++    isComponentError: !!e.isComponentError,
++  };
++
++  const ParseLogBoxLog = require('../LogBox/Data/parseLogBoxLog');
++  const parsed = ParseLogBoxLog.parseLogBoxException(temp);
++  const logParsed = new LogBoxLog(parsed);
++
++  logParsed.handleSymbolicateAsync().then(() => {
++    const stack = logParsed.getAvailableStack();
++    const componentStack = logParsed.getAvailableComponentStack();
++
++    // Function to strip ANSI color codes
++    const stripAnsiColors = (str) => {
++      return str ? str.replace(/\u001b\[[0-9;]*m/g, '') : '';
++    };
++    const codeFrame = stripAnsiColors(logParsed.codeFrame?.content);
++    const codeFrameLocation = `${logParsed.codeFrame?.fileName} (${logParsed.codeFrame?.location.row}:${logParsed.codeFrame?.location.column})`;
++    const componentCodeFrame = stripAnsiColors(logParsed.componentCodeFrame?.content);
++    const componentCodeFrameLocation = `${logParsed.componentCodeFrame?.fileName} (${logParsed.componentCodeFrame?.location.row}:${logParsed.componentCodeFrame?.location.column})`;
++    const formattedStack = formatStack(stack);
++    const formattedComponentStack = formatStack(componentStack);
++
++    const errorDetails = `
++    ${codeFrame && `codeFrame: 
++${codeFrame}
++    ${codeFrameLocation}`}
++    
++    ${componentCodeFrame && `componentCodeFrame: 
++${componentCodeFrame}
++    ${componentCodeFrameLocation}`}
++
++    ${formattedStack && `stack: ${formattedStack}`}
++
++    ${formattedComponentStack && `componentStack: ${formattedComponentStack}`}
++    `
++
++    const errorMsg = logParsed.category;
++
++    const combinedErrorMsg = `${errorMsg}\n\n%errorDetails%${errorDetails}`;
++    const NativeExceptionsManager =
++      require('./NativeExceptionsManager').default;
++
++    if (NativeExceptionsManager) {
++      const errorData = {
++        message: combinedErrorMsg,
++        name: errorMsg,
++        componentStack: componentStack,
++        stack: stack,
++        id: logParsed.id,
++        isFatal: false
++      }
++
++      if (Platform.OS === 'android') {
++        errorData.isFatal = true;
++        errorData.extraData = null;
++      }
++
++      NativeExceptionsManager.reportException(errorData);
++    }
++  });
++}
++
+ /**
+  * Handles the developer-visible aspect of errors and exceptions
+  */
+@@ -101,6 +182,11 @@ function reportException(
+     extraData,
+   });
+ 
++  // TODO: maybe hide this behind if(__VIBECODE__)
++  reportExceptionToNative(data, e);
++  console.log(e);
++  return;
++
+   if (reportToConsole) {
+     // we feed back into console.error, to make sure any methods that are
+     // monkey patched on top of console.error are called when coming from
+diff --git a/Libraries/LogBox/Data/LogBoxData.js b/Libraries/LogBox/Data/LogBoxData.js
+index 37fb35b..70bcd5c 100644
+--- a/Libraries/LogBox/Data/LogBoxData.js
++++ b/Libraries/LogBox/Data/LogBoxData.js
+@@ -188,9 +188,10 @@ function appendNewLog(newLog: LogBoxLog) {
+         handleUpdate();
+       }
+     });
+-  } else if (newLog.level === 'syntax') {
+-    logs.add(newLog);
+-    setSelectedLog(logs.size - 1);
++  // Make syntax errors dismissible  
++  // } else if (newLog.level === 'syntax') {
++  //   logs.add(newLog);
++  //   setSelectedLog(logs.size - 1);
+   } else {
+     logs.add(newLog);
+     handleUpdate();
+diff --git a/Libraries/LogBox/Data/LogBoxLog.js b/Libraries/LogBox/Data/LogBoxLog.js
+index be47521..ba3a79d 100644
+--- a/Libraries/LogBox/Data/LogBoxLog.js
++++ b/Libraries/LogBox/Data/LogBoxLog.js
+@@ -163,6 +163,50 @@ class LogBoxLog {
+     }
+   }
+ 
++  handleSymbolicateAsync(): Promise<void> {
++    const callback = () => {};
++    const promises = [];
++    if (
++      this.symbolicated.status !== 'PENDING' &&
++      this.symbolicated.status !== 'COMPLETE'
++    ) {
++      this.updateStatus(null, null, null, callback);
++      promises.push(LogBoxSymbolication.symbolicate(this.stack, this.extraData).then(
++        data => {
++          this.updateStatus(null, data?.stack, data?.codeFrame, callback);
++        },
++        error => {
++          this.updateStatus(error, null, null, callback);
++        },
++      ));
++    }
++    if (
++      this.componentStack != null &&
++      this.componentStackType === 'stack' &&
++      this.symbolicatedComponentStack.status !== 'PENDING' &&
++      this.symbolicatedComponentStack.status !== 'COMPLETE'
++    ) {
++      this.updateComponentStackStatus(null, null, null, callback);
++      const componentStackFrames = convertComponentStateToStack(
++        this.componentStack,
++      );
++      promises.push(LogBoxSymbolication.symbolicate(componentStackFrames, []).then(
++        data => {
++          this.updateComponentStackStatus(
++            null,
++            convertStackToComponentStack(data.stack),
++            data?.codeFrame,
++            callback,
++          );
++        },
++        error => {
++          this.updateComponentStackStatus(error, null, null, callback);
++        },
++      ));
++    }
++    return Promise.all(promises);
++  }
++
+   handleSymbolicate(callback?: (status: SymbolicationStatus) => void): void {
+     if (
+       this.symbolicated.status !== 'PENDING' &&
+diff --git a/Libraries/LogBox/LogBox.js b/Libraries/LogBox/LogBox.js
+index a9bfdd7..e0fa8e3 100644
+--- a/Libraries/LogBox/LogBox.js
++++ b/Libraries/LogBox/LogBox.js
+@@ -34,7 +34,7 @@ interface ILogBox {
+ /**
+  * LogBox displays logs in the app.
+  */
+-if (__DEV__) {
++if (false) { // __DEV__
+   const LogBoxData = require('./Data/LogBoxData');
+   const {
+     parseLogBoxLog,
+diff --git a/Libraries/LogBox/UI/LogBoxInspector.js b/Libraries/LogBox/UI/LogBoxInspector.js
+index be889b0..3b93f5d 100644
+--- a/Libraries/LogBox/UI/LogBoxInspector.js
++++ b/Libraries/LogBox/UI/LogBoxInspector.js
+@@ -76,6 +76,8 @@ export default function LogBoxInspector(props: Props): React.Node {
+         onDismiss={props.onDismiss}
+         onMinimize={props.onMinimize}
+         level={log.level}
++        log={log}
++        logs={logs}
+       />
+     </View>
+   );
+diff --git a/Libraries/LogBox/UI/LogBoxInspectorFooter.js b/Libraries/LogBox/UI/LogBoxInspectorFooter.js
+index c3a7b69..37d1925 100644
+--- a/Libraries/LogBox/UI/LogBoxInspectorFooter.js
++++ b/Libraries/LogBox/UI/LogBoxInspectorFooter.js
+@@ -8,7 +8,7 @@
+  * @format
+  */
+ 
+-import type {LogLevel} from '../Data/LogBoxLog';
++import LogBoxLog, { type LogLevel } from '../Data/LogBoxLog';
+ 
+ import View from '../../Components/View/View';
+ import StyleSheet from '../../StyleSheet/StyleSheet';
+@@ -16,28 +16,54 @@ import Text from '../../Text/Text';
+ import LogBoxInspectorFooterButton from './LogBoxInspectorFooterButton';
+ import * as LogBoxStyle from './LogBoxStyle';
+ import * as React from 'react';
++import Clipboard from '@react-native-clipboard/clipboard';
+ 
+ type Props = $ReadOnly<{
+   onDismiss: () => void,
+   onMinimize: () => void,
+   level?: ?LogLevel,
++  log?: LogBoxLog,
++  logs?: $ReadOnlyArray<LogBoxLog>,
+ }>;
+ 
+ export default function LogBoxInspectorFooter(props: Props): React.Node {
+-  if (props.level === 'syntax') {
+-    return (
+-      <View style={styles.root}>
+-        <View style={styles.button}>
+-          <Text id="logbox_dismissable_text" style={styles.syntaxErrorText}>
+-            This error cannot be dismissed.
+-          </Text>
+-        </View>
+-      </View>
+-    );
++  // if (props.level === 'syntax') {
++  //   return (
++  //     <View style={styles.root}>
++  //       <View style={styles.button}>
++  //         <Text id="logbox_dismissable_text" style={styles.syntaxErrorText}>
++  //           This error cannot be dismissed.
++  //         </Text>
++  //       </View>
++  //     </View>
++  //   );
++  // }
++
++  const getCopyText = (log: LogBoxLog) => {
++    const message = log.message.content;
++    const filePath = log.codeFrame?.fileName;
++    const codeContent = log.codeFrame?.content;
++    const copyText = `${message}\n\n${filePath}\n\n${codeContent}`.replaceAll(/\u001b\[[0-9;]*m/g, '');
++    return copyText;
++  }
++
++  const copyToClipboard = () => {
++    if (props.log) {
++      Clipboard.setString(getCopyText(props.log));
++    }
++  }
++
++  const copyAllToClipboard = () => {
++    if (props.logs) {
++      const copyText = props.logs.map(log => getCopyText(log)).join('\n');
++      Clipboard.setString(copyText);
++    }
+   }
+ 
+   return (
+     <View style={styles.root}>
++      <LogBoxInspectorFooterButton text="Copy" onPress={copyToClipboard} />
++      <LogBoxInspectorFooterButton text="Copy All" onPress={copyAllToClipboard} />
+       <LogBoxInspectorFooterButton
+         id="logbox_footer_button_dismiss"
+         text="Dismiss"
+diff --git a/Libraries/Network/RCTHTTPRequestHandler.h b/Libraries/Network/RCTHTTPRequestHandler.h
+index 768982a..f1dbd0b 100644
+--- a/Libraries/Network/RCTHTTPRequestHandler.h
++++ b/Libraries/Network/RCTHTTPRequestHandler.h
+@@ -14,6 +14,22 @@ typedef NSURLSessionConfiguration * (^NSURLSessionConfigurationProvider)(void);
+  * app.
+  */
+ RCT_EXTERN void RCTSetCustomNSURLSessionConfigurationProvider(NSURLSessionConfigurationProvider);
++
++/**
++ * Set proxy credentials for HTTP requests.
++ */
++RCT_EXTERN void RCTSetProxyCredentials(NSString *username, NSString *password);
++
++/**
++ * Set proxy host for HTTP requests.
++ */
++RCT_EXTERN void RCTSetProxyHost(NSString *host);
++
++/**
++ * Set proxied domains for HTTP requests.
++ */
++RCT_EXTERN void RCTSetProxiedDomains(NSArray<NSString *> *domains);
++
+ /**
+  * This is the default RCTURLRequestHandler implementation for HTTP requests.
+  */
+diff --git a/Libraries/Network/RCTHTTPRequestHandler.mm b/Libraries/Network/RCTHTTPRequestHandler.mm
+index 8f21bf3..f9c9a27 100644
+--- a/Libraries/Network/RCTHTTPRequestHandler.mm
++++ b/Libraries/Network/RCTHTTPRequestHandler.mm
+@@ -20,11 +20,32 @@ @interface RCTHTTPRequestHandler () <NSURLSessionDataDelegate, RCTTurboModule>
+ 
+ static NSURLSessionConfigurationProvider urlSessionConfigurationProvider;
+ 
++static NSString *proxyUsername = nil;
++static NSString *proxyPassword = nil;
++static NSString *proxyHost = nil;
++static NSSet<NSString *> *proxiedDomains = nil;
++
+ void RCTSetCustomNSURLSessionConfigurationProvider(NSURLSessionConfigurationProvider provider)
+ {
+   urlSessionConfigurationProvider = provider;
+ }
+ 
++void RCTSetProxyCredentials(NSString *username, NSString *password)
++{
++  proxyUsername = username;
++  proxyPassword = password;
++}
++
++void RCTSetProxyHost(NSString *host)
++{
++  proxyHost = host;
++}
++
++void RCTSetProxiedDomains(NSArray<NSString *> *domains)
++{
++  proxiedDomains = [NSSet setWithArray:domains];
++}
++
+ @implementation RCTHTTPRequestHandler {
+   NSMapTable *_delegates;
+   NSURLSession *_session;
+@@ -66,6 +87,42 @@ - (BOOL)canHandleRequest:(NSURLRequest *)request
+ - (NSURLSessionDataTask *)sendRequest:(NSURLRequest *)request withDelegate:(id<RCTURLRequestDelegate>)delegate
+ {
+   std::lock_guard<std::mutex> lock(_mutex);
++
++  // Proxy code
++  NSMutableURLRequest *mutableRequest = [request mutableCopy];
++  NSURL *originalURL = request.URL;
++  if (originalURL.host && proxyHost && proxiedDomains != nil) {
++    BOOL shouldProxy = NO;
++    for (NSString *domain in proxiedDomains) {
++      if ([originalURL.host isEqualToString:domain] || 
++          [originalURL.host hasSuffix:[NSString stringWithFormat:@".%@", domain]]) {
++        shouldProxy = YES;
++        break;
++      }
++    }
++    
++    if (shouldProxy) {
++      NSString *modifiedHost = [NSString stringWithFormat:@"%@.%@", originalURL.host, proxyHost];
++
++      NSURLComponents *components = [NSURLComponents componentsWithURL:originalURL resolvingAgainstBaseURL:NO];
++      components.host = modifiedHost;
++
++      if (proxyUsername && proxyPassword) {
++        components.user = proxyUsername;
++        components.password = proxyPassword;
++      }
++
++      NSURL *modifiedURL = [components URL];
++      if (modifiedURL) {
++        mutableRequest.URL = modifiedURL;
++        NSLog(@"Modified URL: %@", mutableRequest.URL.absoluteString);
++        if (proxyUsername && [proxyUsername length] > 0) {
++          [mutableRequest setValue:proxyUsername forHTTPHeaderField:@"X-Vibecode-Project"];
++        }
++      }
++    }
++  }
++
+   // Lazy setup
+   if (!_session && [self isValid]) {
+     // You can override default NSURLSession instance property allowsCellularAccess (default value YES)
+@@ -99,7 +156,7 @@ - (NSURLSessionDataTask *)sendRequest:(NSURLRequest *)request withDelegate:(id<R
+                                            valueOptions:NSPointerFunctionsStrongMemory
+                                                capacity:0];
+   }
+-  NSURLSessionDataTask *task = [_session dataTaskWithRequest:request];
++  NSURLSessionDataTask *task = [_session dataTaskWithRequest:mutableRequest];
+   [_delegates setObject:delegate forKey:task];
+   [task resume];
+   return task;
+diff --git a/React/Base/RCTAssert.m b/React/Base/RCTAssert.m
+index ca8542e..63f844b 100644
+--- a/React/Base/RCTAssert.m
++++ b/React/Base/RCTAssert.m
+@@ -127,9 +127,9 @@ void RCTFatal(NSError *error)
+   if (fatalHandler) {
+     fatalHandler(error);
+   } else {
+-#if DEBUG
++// #if DEBUG
+     @try {
+-#endif
++// #endif
+       NSString *name = [NSString stringWithFormat:@"%@: %@", RCTFatalExceptionName, error.localizedDescription];
+ 
+       // Truncate the localized description to 175 characters to avoid wild screen overflows
+@@ -145,10 +145,10 @@ void RCTFatal(NSError *error)
+       // reason: <underlying error description plus JS stack trace, truncated to 175 characters>
+       // userInfo: <underlying error userinfo, plus untruncated description plus JS stack trace>
+       @throw [[NSException alloc] initWithName:name reason:message userInfo:userInfo];
+-#if DEBUG
++// #if DEBUG
+     } @catch (NSException *e) {
+     }
+-#endif
++// #endif
+   }
+ }
+ 
+diff --git a/React/Base/RCTDefines.h b/React/Base/RCTDefines.h
+index 228d92c..f87902b 100644
+--- a/React/Base/RCTDefines.h
++++ b/React/Base/RCTDefines.h
+@@ -92,7 +92,7 @@
+  * By default though, it will inherit from RCT_DEV.
+  */
+ #ifndef RCT_DEV_MENU
+-#define RCT_DEV_MENU RCT_DEV
++#define RCT_DEV_MENU 1 //RCT_DEV
+ #endif
+ 
+ #ifndef RCT_DEV_SETTINGS_ENABLE_PACKAGER_CONNECTION
+diff --git a/React/Base/RCTRedBoxSetEnabled.m b/React/Base/RCTRedBoxSetEnabled.m
+index 51142be..7a077df 100644
+--- a/React/Base/RCTRedBoxSetEnabled.m
++++ b/React/Base/RCTRedBoxSetEnabled.m
+@@ -10,7 +10,7 @@
+ #if RCT_DEV
+ static BOOL redBoxEnabled = YES;
+ #else
+-static BOOL redBoxEnabled = NO;
++static BOOL redBoxEnabled = YES; // NO;
+ #endif
+ 
+ void RCTRedBoxSetEnabled(BOOL enabled)
+diff --git a/React/CoreModules/RCTDevMenu.mm b/React/CoreModules/RCTDevMenu.mm
+index 3918ea0..d606ef1 100644
+--- a/React/CoreModules/RCTDevMenu.mm
++++ b/React/CoreModules/RCTDevMenu.mm
+@@ -105,13 +105,13 @@ @implementation RCTDevMenu {
+ 
+ RCT_EXPORT_MODULE()
+ 
+-+ (void)initialize
+-{
+-  // We're swizzling here because it's poor form to override methods in a category,
+-  // however UIWindow doesn't actually implement motionEnded:withEvent:, so there's
+-  // no need to call the original implementation.
+-  RCTSwapInstanceMethods([UIWindow class], @selector(motionEnded:withEvent:), @selector(RCT_motionEnded:withEvent:));
+-}
++//+ (void)initialize
++//{
++//  // We're swizzling here because it's poor form to override methods in a category,
++//  // however UIWindow doesn't actually implement motionEnded:withEvent:, so there's
++//  // no need to call the original implementation.
++//  RCTSwapInstanceMethods([UIWindow class], @selector(motionEnded:withEvent:), @selector(RCT_motionEnded:withEvent:));
++//}
+ 
+ + (BOOL)requiresMainQueueSetup
+ {
+diff --git a/React/CoreModules/RCTRedBox.h b/React/CoreModules/RCTRedBox.h
+index a8031aa..2f5615b 100644
+--- a/React/CoreModules/RCTRedBox.h
++++ b/React/CoreModules/RCTRedBox.h
+@@ -14,6 +14,8 @@
+ 
+ typedef void (^RCTRedBoxButtonPressHandler)(void);
+ 
++static NSString * const VibecodeRedBoxErrorShown = @"VibecodeRedBoxErrorShown";
++
+ @interface RCTRedBox : NSObject <RCTBridgeModule>
+ 
+ - (void)registerErrorCustomizer:(id<RCTErrorCustomizer>)errorCustomizer;
+diff --git a/React/CoreModules/RCTRedBox.mm b/React/CoreModules/RCTRedBox.mm
+index fb057b9..0a20ae4 100644
+--- a/React/CoreModules/RCTRedBox.mm
++++ b/React/CoreModules/RCTRedBox.mm
+@@ -612,23 +612,55 @@ - (void)showErrorMessage:(NSString *)message
+       self->_extraDataViewController.actionDelegate = self;
+     }
+ 
++    // Emit event when showErrorMessage is called
++// #pragma clang diagnostic push
++// #pragma clang diagnostic ignored "-Wdeprecated-declarations"
++//     [[self->_moduleRegistry moduleForName:"EventDispatcher"] sendDeviceEventWithName:@"redBoxErrorShown"
++//                                                                                 body:@{
++//                                                                                   @"message": message ?: @"",
++//                                                                                   @"isUpdate": @(isUpdate),
++//                                                                                   @"errorCookie": @(errorCookie)
++//                                                                                 }];
++// #pragma clang diagnostic pop
++
++    // Also post a notification for native listeners
++    NSMutableArray *stackDictionaries = [NSMutableArray array];
++    for (RCTJSStackFrame *frame in stack) {
++      NSMutableDictionary *frameDict = [NSMutableDictionary dictionary];
++      if (frame.methodName) frameDict[@"methodName"] = frame.methodName;
++      if (frame.file) frameDict[@"file"] = frame.file;
++      frameDict[@"lineNumber"] = @(frame.lineNumber);
++      frameDict[@"column"] = @(frame.column);
++      frameDict[@"collapse"] = @(frame.collapse);
++      [stackDictionaries addObject:frameDict];
++    }
++    
++    [[NSNotificationCenter defaultCenter] postNotificationName:VibecodeRedBoxErrorShown
++                                                        object:self
++                                                      userInfo:@{
++                                                        @"message": message ?: @"",
++                                                        @"isUpdate": @(isUpdate),
++                                                        @"errorCookie": @(errorCookie),
++                                                        @"stack": stackDictionaries
++                                                      }];
++
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+     [[self->_moduleRegistry moduleForName:"EventDispatcher"] sendDeviceEventWithName:@"collectRedBoxExtraData"
+                                                                                 body:nil];
+ #pragma clang diagnostic pop
+-    if (!self->_controller) {
+-      self->_controller = [[RCTRedBoxController alloc] initWithCustomButtonTitles:self->_customButtonTitles
+-                                                             customButtonHandlers:self->_customButtonHandlers];
+-      self->_controller.actionDelegate = self;
+-    }
+-
+-    RCTErrorInfo *errorInfo = [[RCTErrorInfo alloc] initWithErrorMessage:message stack:stack];
+-    errorInfo = [self _customizeError:errorInfo];
+-    [self->_controller showErrorMessage:errorInfo.errorMessage
+-                              withStack:errorInfo.stack
+-                               isUpdate:isUpdate
+-                            errorCookie:errorCookie];
++//    if (!self->_controller) {
++//      self->_controller = [[RCTRedBoxController alloc] initWithCustomButtonTitles:self->_customButtonTitles
++//                                                             customButtonHandlers:self->_customButtonHandlers];
++//      self->_controller.actionDelegate = self;
++//    }
++//
++//    RCTErrorInfo *errorInfo = [[RCTErrorInfo alloc] initWithErrorMessage:message stack:stack];
++//    errorInfo = [self _customizeError:errorInfo];
++//    [self->_controller showErrorMessage:errorInfo.errorMessage
++//                              withStack:errorInfo.stack
++//                               isUpdate:isUpdate
++//                            errorCookie:errorCookie];
+   });
+ }
+ 
+@@ -656,7 +688,8 @@ - (void)loadExtraDataViewController
+ 
+ - (void)invalidate
+ {
+-  [self dismiss];
++  // workaround for https://github.com/facebook/react-native/pull/50867
++  // [self dismiss];
+ }
+ 
+ - (void)redBoxController:(__unused RCTRedBoxController *)redBoxController
+diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
+index 9fbf1f8..f632d0a 100644
+--- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
++++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DefaultDevLoadingViewImplementation.kt
+@@ -11,10 +11,13 @@ import android.content.Context
+ import android.graphics.Rect
+ import android.view.Gravity
+ import android.view.LayoutInflater
++import android.view.View
+ import android.view.ViewGroup
+ import android.view.WindowManager
++import android.widget.FrameLayout
+ import android.widget.PopupWindow
+ import android.widget.TextView
++import androidx.core.view.children
+ import com.facebook.common.logging.FLog
+ import com.facebook.react.R
+ import com.facebook.react.bridge.UiThreadUtil
+@@ -22,15 +25,18 @@ import com.facebook.react.common.ReactConstants
+ import com.facebook.react.devsupport.interfaces.DevLoadingViewManager
+ import java.util.Locale
+ 
++public interface DevLoadingMessageDisplay {
++  public fun showMessage(message: String)
++  public fun hideMessage()
++}
++
+ /**
+  * Default implementation of Dev Loading View Manager to display loading messages on top of the
+  * screen. All methods are thread safe.
+  */
+ public class DefaultDevLoadingViewImplementation(
+-    private val reactInstanceDevHelper: ReactInstanceDevHelper
++  private val reactInstanceDevHelper: ReactInstanceDevHelper
+ ) : DevLoadingViewManager {
+-  private var devLoadingView: TextView? = null
+-  private var devLoadingPopup: PopupWindow? = null
+ 
+   override fun showMessage(message: String) {
+     if (!isEnabled) {
+@@ -45,11 +51,11 @@ public class DefaultDevLoadingViewImplementation(
+     }
+     UiThreadUtil.runOnUiThread {
+       val percentage =
+-          if (done != null && total != null && total > 0)
+-              String.format(Locale.getDefault(), " %.1f%%", done.toFloat() / total * 100)
+-          else ""
+-      devLoadingView?.text =
+-          "${status ?: "Loading"}${percentage}\u2026" // `...` character at the end
++        if (done != null && total != null && total > 0)
++          String.format(Locale.getDefault(), " %.1f%%", done.toFloat() / total * 100)
++        else ""
++      showMessage(
++        "${status ?: "Loading"}${percentage}\u2026") // `...` character at the end
+     }
+   }
+ 
+@@ -60,51 +66,13 @@ public class DefaultDevLoadingViewImplementation(
+   }
+ 
+   private fun showInternal(message: String) {
+-    if (devLoadingPopup?.isShowing == true) {
+-      // already showing
+-      return
+-    }
+-    val currentActivity = reactInstanceDevHelper.currentActivity
+-    if (currentActivity == null) {
+-      FLog.e(
+-          ReactConstants.TAG,
+-          "Unable to display loading message because react " + "activity isn't available")
+-      return
+-    }
+-
+-    // PopupWindow#showAtLocation uses absolute screen position. In order for
+-    // loading view to be placed below status bar (if the status bar is present) we need to pass
+-    // an appropriate Y offset.
+-    try {
+-      val rectangle = Rect()
+-      currentActivity.window.decorView.getWindowVisibleDisplayFrame(rectangle)
+-      val topOffset = rectangle.top
+-      val inflater =
+-          currentActivity.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+-      val view = inflater.inflate(R.layout.dev_loading_view, null) as TextView
+-      view.text = message
+-      val popup =
+-          PopupWindow(
+-              view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+-      popup.isTouchable = false
+-      popup.showAtLocation(currentActivity.window.decorView, Gravity.NO_GRAVITY, 0, topOffset)
+-      devLoadingView = view
+-      devLoadingPopup = popup
+-      // TODO T164786028: Find out the root cause of the BadTokenException exception here
+-    } catch (e: WindowManager.BadTokenException) {
+-      FLog.e(
+-          ReactConstants.TAG,
+-          "Unable to display loading message because react activity isn't active, message: $message")
+-    }
++    val currentActivity = reactInstanceDevHelper.currentActivity as DevLoadingMessageDisplay
++    currentActivity.showMessage(message)
+   }
+ 
+   private fun hideInternal() {
+-    val popup = devLoadingPopup ?: return
+-    if (popup.isShowing == true) {
+-      popup.dismiss()
+-      devLoadingPopup = null
+-      devLoadingView = null
+-    }
++    val currentActivity = reactInstanceDevHelper.currentActivity as DevLoadingMessageDisplay
++    currentActivity.hideMessage()
+   }
+ 
+   public companion object {
+@@ -115,3 +83,4 @@ public class DefaultDevLoadingViewImplementation(
+     }
+   }
+ }
++
+diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
+index 1e5084e..9298748 100644
+--- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
++++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/DevServerHelper.kt
+@@ -273,7 +273,8 @@ public open class DevServerHelper(
+     }
+     return (String.format(
+         Locale.US,
+-        "http://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
++        "%s://%s/%s.%s?platform=android&dev=%s&lazy=%s&minify=%s&app=%s&modulesOnly=%s&runModule=%s",
++        packagerConnectionSettings.debugServerScheme,
+         host,
+         mainModuleID,
+         type.typeID,
+diff --git a/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt b/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
+index da82cd9..505c549 100644
+--- a/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
++++ b/ReactAndroid/src/main/java/com/facebook/react/devsupport/PackagerStatusCheck.kt
+@@ -88,7 +88,7 @@ internal class PackagerStatusCheck {
+   private companion object {
+     private const val PACKAGER_OK_STATUS = "packager-status:running"
+     private const val HTTP_CONNECT_TIMEOUT_MS = 5_000
+-    private const val PACKAGER_STATUS_URL_TEMPLATE = "http://%s/status"
++    private const val PACKAGER_STATUS_URL_TEMPLATE = "https://%s/status"
+ 
+     private fun createPackagerStatusURL(host: String): String =
+         String.format(Locale.US, PACKAGER_STATUS_URL_TEMPLATE, host)
+diff --git a/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt b/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
+index a9fa679..4e6c87a 100644
+--- a/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
++++ b/ReactAndroid/src/main/java/com/facebook/react/packagerconnection/PackagerConnectionSettings.kt
+@@ -15,14 +15,29 @@ import android.preference.PreferenceManager
+ import com.facebook.common.logging.FLog
+ import com.facebook.react.modules.systeminfo.AndroidInfoHelpers
+ 
++public interface PackagerConnectionSettingsProvider {
++  public val settings: ConnectionSettings
++}
++
++public interface ConnectionSettings {
++  public val scheme: String
++  public val host: String
++}
++
+ public open class PackagerConnectionSettings(private val appContext: Context) {
++  private val settings = if (appContext is PackagerConnectionSettingsProvider)  appContext.settings else null
+   private val preferences: SharedPreferences =
+       PreferenceManager.getDefaultSharedPreferences(appContext)
+   public val packageName: String = appContext.packageName
+   private val _additionalOptionsForPackager: MutableMap<String, String> = mutableMapOf()
+ 
++  public open var debugServerScheme: String = settings?.scheme?:"http"
++
+   public open var debugServerHost: String
+     get() {
++      if (settings != null) {
++        return settings.host
++      }
+       // Check host setting first. If empty try to detect emulator type and use default
+       // hostname for those
+       val hostFromSettings = preferences.getString(PREFS_DEBUG_SERVER_HOST_KEY, null)
+@@ -41,7 +56,9 @@ public open class PackagerConnectionSettings(private val appContext: Context) {
+       if (host.isEmpty()) {
+         preferences.edit().remove(PREFS_DEBUG_SERVER_HOST_KEY).apply()
+       } else {
+-        preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
++        if(settings == null) {
++          preferences.edit().putString(PREFS_DEBUG_SERVER_HOST_KEY, host).apply()
++        }
+       }
+     }
+ 
+diff --git a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
+index 5d4ea87..a02fee2 100644
+--- a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
++++ b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.h
+@@ -25,6 +25,8 @@ NS_ASSUME_NONNULL_BEGIN
+ RCT_EXTERN NSString *RCTInstanceRuntimeDiagnosticFlags(void);
+ RCT_EXTERN void RCTInstanceSetRuntimeDiagnosticFlags(NSString *_Nullable flags);
+ 
++static NSString * const VibecodeBundleLoadingProgress = @"VibecodeBundleLoadingProgress";
++
+ @class RCTBundleManager;
+ @class RCTInstance;
+ @class RCTJSThreadManager;
+diff --git a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
+index 7d621ac..c534a6d 100644
+--- a/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
++++ b/ReactCommon/react/runtime/platform/ios/ReactCommon/RCTInstance.mm
+@@ -501,13 +501,19 @@ - (void)handleBundleLoadingError:(NSError *)error
+ 
+ - (void)_loadJSBundle:(NSURL *)sourceURL
+ {
+-#if RCT_DEV_MENU && __has_include(<React/RCTDevLoadingViewProtocol.h>)
+-  {
+-    id<RCTDevLoadingViewProtocol> loadingView =
+-        (id<RCTDevLoadingViewProtocol>)[_turboModuleManager moduleForName:"DevLoadingView"];
+-    [loadingView showWithURL:sourceURL];
+-  }
+-#endif
++//#if RCT_DEV_MENU && __has_include(<React/RCTDevLoadingViewProtocol.h>)
++//  {
++//    id<RCTDevLoadingViewProtocol> loadingView =
++//        (id<RCTDevLoadingViewProtocol>)[_turboModuleManager moduleForName:"DevLoadingView"];
++//    [loadingView showWithURL:sourceURL];
++//  }
++//#endif
++
++  // Emit bundle loading started event
++  [[NSNotificationCenter defaultCenter] postNotificationName:VibecodeBundleLoadingProgress
++                                                      object:self
++                                                    userInfo:@{}];
++
+ 
+   __weak __typeof(self) weakSelf = self;
+   [_delegate loadBundleAtURL:sourceURL
+@@ -516,12 +522,30 @@ - (void)_loadJSBundle:(NSURL *)sourceURL
+         if (!strongSelf) {
+           return;
+         }
++        
++        // Emit bundle loading progress event
++        NSMutableDictionary *progressUserInfo = [NSMutableDictionary dictionary];
+ 
+-#if RCT_DEV_MENU && __has_include(<React/RCTDevLoadingViewProtocol.h>)
+-        id<RCTDevLoadingViewProtocol> loadingView =
+-            (id<RCTDevLoadingViewProtocol>)[strongSelf->_turboModuleManager moduleForName:"DevLoadingView"];
+-        [loadingView updateProgress:progressData];
+-#endif
++        if (progressData) {
++          if (progressData.done != nil) {
++            progressUserInfo[@"done"] = progressData.done;
++          }
++          if (progressData.total != nil) {
++            progressUserInfo[@"total"] = progressData.total;
++          }
++          if (progressData.status) {
++            progressUserInfo[@"status"] = progressData.status;
++          }
++        }
++        [[NSNotificationCenter defaultCenter] postNotificationName:VibecodeBundleLoadingProgress
++                                                            object:strongSelf
++                                                          userInfo:progressUserInfo];
++        
++//#if RCT_DEV_MENU && __has_include(<React/RCTDevLoadingViewProtocol.h>)
++//        id<RCTDevLoadingViewProtocol> loadingView =
++//            (id<RCTDevLoadingViewProtocol>)[strongSelf->_turboModuleManager moduleForName:"DevLoadingView"];
++//        [loadingView updateProgress:progressData];
++//#endif
+       }
+       onComplete:^(NSError *error, RCTSource *source) {
+         __typeof(self) strongSelf = weakSelf;
+diff --git a/src/private/devsupport/devmenu/elementinspector/Inspector.js b/src/private/devsupport/devmenu/elementinspector/Inspector.js
+index 98ba78f..897e8d5 100644
+--- a/src/private/devsupport/devmenu/elementinspector/Inspector.js
++++ b/src/private/devsupport/devmenu/elementinspector/Inspector.js
+@@ -20,6 +20,7 @@ import type {ReactDevToolsAgent} from '../../../../../Libraries/Types/ReactDevTo
+ 
+ import SafeAreaView from '../../../components/safeareaview/SafeAreaView_INTERNAL_DO_NOT_USE';
+ import * as React from 'react';
++import { requireOptionalNativeModule } from 'expo-modules-core';
+ 
+ const View = require('../../../../../Libraries/Components/View/View').default;
+ const PressabilityDebug = require('../../../../../Libraries/Pressability/PressabilityDebug');
+@@ -72,6 +73,8 @@ function Inspector({
+   const [elementsHierarchy, setElementsHierarchy] =
+     useState<?ElementsHierarchy>(null);
+ 
++  const VibecodeExpoModule = requireOptionalNativeModule('VibecodeExpoModule');
++
+   const setSelection = (i: number) => {
+     const hierarchyItem = elementsHierarchy?.[i];
+     if (hierarchyItem == null) {
+@@ -104,6 +107,16 @@ function Inspector({
+         closestInstance,
+       } = viewData;
+ 
++      if (VibecodeExpoModule && VibecodeExpoModule.sendSelectedElementData) {
++        const elementData = {
++          hierarchy: hierarchy.map(item => item.name),
++          frame,
++          style: props.style,
++        };
++
++        VibecodeExpoModule.sendSelectedElementData(elementData);
++      }
++
+       // Sync the touched view with React DevTools.
+       // Note: This is Paper only. To support Fabric,
+       // DevTools needs to be updated to not rely on view tags.
+@@ -171,7 +184,7 @@ function Inspector({
+         />
+       )}
+ 
+-      <SafeAreaView style={[styles.panelContainer, panelContainerStyle]}>
++      {/* <SafeAreaView style={[styles.panelContainer, panelContainerStyle]}>
+         <InspectorPanel
+           devtoolsIsOpen={!!reactDevToolsAgent}
+           inspecting={selectedTab === 'elements-inspector'}
+@@ -187,7 +200,7 @@ function Inspector({
+           networking={selectedTab === 'network-profiling'}
+           setNetworking={setNetworking}
+         />
+-      </SafeAreaView>
++      </SafeAreaView> */}
+     </View>
+   );
+ }

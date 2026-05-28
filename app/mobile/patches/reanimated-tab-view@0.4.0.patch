@@ -1,0 +1,28 @@
+diff --git a/node_modules/reanimated-tab-view/src/hooks/useTabLayout.ts b/node_modules/reanimated-tab-view/src/hooks/useTabLayout.ts
+index bbe8deb..e318721 100644
+--- a/node_modules/reanimated-tab-view/src/hooks/useTabLayout.ts
++++ b/node_modules/reanimated-tab-view/src/hooks/useTabLayout.ts
+@@ -21,17 +21,15 @@ export const useHandleTabLayout = (index: number) => {
+             ...routeIndexToTabWidthMapSV.value,
+             [index]: width,
+           };
+-          let prevRouteIndexOffset = 0;
+-          for (let i = 0; i <= noOfRoutes; i += 1) {
+-            const prevRouteIndexWidth =
+-              routeIndexToTabWidthMapSV.value[i - 1] ?? 0;
+-            const currentRouteIndexOffset =
+-              prevRouteIndexOffset + prevRouteIndexWidth;
++          let cumulativeOffset = 0;
++          for (let i = 0; i < noOfRoutes; i += 1) {
+             routeIndexToTabOffsetMapSV.value = {
+               ...routeIndexToTabOffsetMapSV.value,
+-              [i]: currentRouteIndexOffset,
++              [i]: cumulativeOffset,
+             };
+-            prevRouteIndexOffset = currentRouteIndexOffset;
++            const currentRouteIndexWidth =
++              routeIndexToTabWidthMapSV.value[i] ?? 0;
++            cumulativeOffset += currentRouteIndexWidth;
+           }
+         }
+       }
