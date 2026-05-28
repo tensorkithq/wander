@@ -44,7 +44,9 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
 - **Air has no LiDAR** → camera-first perception via **external APIs** (OpenAI GPT-4o-vision +
   **Replicate** hosted models), **sampled ~1–3 fps** — no local models, no torch on the laptop, no
   mapping/nav stack, no own GPU for Phase 1. (Sidesteps DimOS's bundled perception modules and their
-  git-LFS model tarballs entirely.)
+  git-LFS model tarballs entirely.) Backends are **pluggable behind one interface** and routed by
+  latency budget; a self-hosted **CUDA endpoint ("our own Replicate", over Tailscale)** can be added
+  as a drop-in third backend for the **instant-feedback tier** (continuous tracking) — see ws3.
 - **Air has no onboard mic or speaker** → all voice I/O lives on the phone/laptop. Yugo "speaks
   through Yugo" (the app/laptop speaker).
 - **WebRTC `LocalSTA` requires the laptop on the dog's LAN** → only the laptop holds the robot link.

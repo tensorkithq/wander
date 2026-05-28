@@ -1,4 +1,4 @@
-# PRD — Workstream 3: GPU Skills FastAPI (optional / additive)
+# PRD — Workstream 3: CUDA Inference Endpoint ("our own Replicate")
 
 **Date:** 2026-05-28 · **Status:** DEFERRED (2026-05-28) · **Serves:** the laptop bridge (ws1)
 
@@ -8,10 +8,21 @@
 > that per-call pricing can't afford.
 
 ## Objective
-A **second FastAPI**, running on the CUDA server (RunPod A5000), that exposes **heavier "skills"**
-the laptop bridge can call when the **M2 Pro isn't enough to do it live** — and **stream results
-back down** to the laptop FastAPI. It is an **augmentation**, not a dependency: Phase 1 runs entirely
-without it (laptop/MPS).
+A **self-hosted, low-latency model-serving endpoint** on the CUDA server (RunPod A5000), built and
+run like **"our own Replicate"**: a stateless FastAPI hosting the **specific models we need**, with
+the **same request/response shape as Replicate/OpenAI** so the brain treats it as just one more
+**pluggable perception backend**. It serves the **instant-feedback tier** — continuous / high-fps
+vision that per-call external APIs are too slow or costly for.
+
+Its edge over actual Replicate: **warm models (no cold start), flat hourly cost, low latency over
+Tailscale, and exactly the models we choose.**
+
+**Not a DimOS node** — an independent inference service (plain FastAPI + models, or Triton/vLLM-style).
+The brain routes each perception need to the cheapest backend that meets its latency budget:
+**OpenAI vision** (occasional/VLM) · **Replicate** (on-demand hosted) · **this endpoint**
+(continuous/instant) — and falls back gracefully if it's down. Phase 1 runs without it (OpenAI +
+Replicate, sampled); add it when latency demands. **Reflexes stay on the laptop regardless** — this
+endpoint is "responsive," not reflex-instant (the laptop↔cloud hop is tens of ms).
 
 ## When we actually need it
 Reach for this only when a capability is too heavy for the laptop to run at interactive rates:
