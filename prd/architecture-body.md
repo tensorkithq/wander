@@ -27,8 +27,10 @@ A $60 Pi can replace the laptop with no code change.
   is the `/feed` WebRTC relay on the hub (designed — see
   `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`). Also samples frames to the mind for perception.
 - **App contract:** the stable HTTP/WS API the Yugo app codes against (LAN, low latency).
-- **Agent orchestration loop:** runs *here*, but each step calls the mind — `/agent/say` forwards an
-  utterance to the cloud agent and applies the returned behavior + reply.
+- **Conversational brain (Realtime):** the body hosts the OpenAI **Realtime** session *in-process* —
+  voice in → voice out **plus** tool calls that execute in-process against the controllers (no HTTP
+  hop). The mind stays a thin STT/vision context wrapper. `POST /agent/say` is the **text-only
+  fallback** into the same persona + tool layer. (See `module-realtime-session.md`.)
 - **Wand ingest:** `/sensor` accepts the phone's magnetometer/IMU/gesture readings → feeds mood/music.
 
 ## What the body does NOT do (delegated to the mind)
@@ -40,7 +42,7 @@ A $60 Pi can replace the laptop with no code change.
 ## Data flows
 ```
 RN app ──LAN HTTP/WS──▶ BODY (FastAPI) ──WebRTC LocalSTA──▶ Yugo     (control: local, fast)
-                          │  POST /agent/say  ─────▶ MIND: OpenAI    (reply text + behavior)
+      Realtime brain IN body ◀──────────────▶ OpenAI Realtime (voice+tools; /agent/say = text fallback)
                           │  sampled frames    ─────▶ MIND: perception (detections/scene)
                           │  mood/music cue    ─────▶ MIND: ElevenLabs (music gen)
 RN app ──direct──▶ Deepgram STT / ElevenLabs TTS                      (voice audio: app-side)
@@ -55,8 +57,10 @@ RN app ──direct──▶ Deepgram STT / ElevenLabs TTS                      
   are superseded by the hub; only its camera MJPEG has no hub equivalent yet. (The earlier
   `fastapi/validate_api.py` connection-validator seed is gone, folded into the hub.)
 - **Target:** the full hub surface in `../yugo/openapi.yaml` — control + state + agent + sensor +
-  audio-trigger endpoints, with the mind delegated behind `/agent/say` and the perception adapter.
-  Near-term order: video as the `/feed` WebRTC relay → `/ws/state` → `/agent/say`.
+  audio-trigger endpoints, with the conversational brain as a body-hosted **Realtime** session
+  (`/agent/say` = text fallback) and the mind a thin STT/vision wrapper. Feature specs: `module-*.md`.
+  Phased order: **P1** `/feed` + `/ws/state` (retire the bridge) → **P2** Realtime session + `/mode`
+  → **P3** modes (personal/friend/find/wand) → **P4** meditation (`/breathe` + `/led`).
 
 ## Hard-won constraints (from live testing 2026-05-28/29)
 - **Tricks need a precondition:** expressive moves (e.g., `WiggleHips` 1033) are ignored unless Yugo

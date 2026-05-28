@@ -74,8 +74,8 @@ charged/safe/curious states). Robot connection/motion config is **not** in the D
 `alembic upgrade head`.
 
 ## Scope (per the PRDs)
-This package is **the body** (canonical spec: `../prd/architecture-body.md`; detailed tier doc:
-`../prd/01-laptop-bridge-api.md`): a light FastAPI on the dog's LAN that owns the WebRTC link,
+This package is **the body** (canonical spec: `../prd/architecture-body.md`; feature specs:
+`../prd/module-*.md`): a light FastAPI on the dog's LAN that owns the WebRTC link,
 executes control locally, and runs the fast/reflex (deadman) loop. Intelligence — LLM reasoning,
 perception, voice/music — is delegated to **the mind** (cloud, `../prd/architecture-mind.md`); the
 body carries text, not audio.
@@ -85,18 +85,24 @@ keyboard nav + deadman teleop (`/up`…`/right`, `/cmd_vel`, `/stop`, `/state`),
 persistence.
 
 **Designed, not yet built:** the `/ws/state` telemetry WebSocket and the WebRTC video feed
-(`/feed`) — see `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`. The agent loop (DimOS
-agentic, `OPENAI_API_KEY`) and perception (OpenAI vision / Replicate) are mind-side and not in this
-package yet.
+(`/feed`) — see `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`. The conversational brain is a
+body-hosted OpenAI **Realtime** session that lives *here* in `yugo/` (`../prd/module-realtime-session.md`),
+with `POST /agent/say` as its text fallback; the **mind** (`expressmind`) is a thin cloud STT +
+GPT-4o vision wrapper the body delegates to (sampled frames out, mood/detections back).
 
-## Roadmap / TODO (body-side, toward the Phase-1 demo)
-Demo arc: **meet → talk calm → wand summons music → dance → meditate.** Milestones are demoable on
-their own. The RN app (ws2) and the cloud mind are parallel tracks; perception/vision is **out of
-scope** for the Phase-1 demo (no demo beat needs it).
+## Roadmap / TODO (body-side) — in PRIORITY order
+Demo arc (per the module PRDs): **see → talk → cast spells → find → relax.** The order below is by
+**priority** (not strict phase — the `(Px)` tags show dependency phase). The RN app (ws2) and the
+cloud **mind** (`expressmind` — STT + GPT-4o vision wrapper) are parallel tracks; sampled vision via
+the mind **is** in scope (drives personal/find); the body never runs local models. Specs: `../prd/module-*.md`.
 
 - [x] **M0 — Foundation:** safe control, reflex/deadman, expressive actions, `/state`, persistence, tests.
-- [ ] **M1 — See + drive:** `/feed` WebRTC video relay (designed) → `/ws/state` aura/telemetry.
-- [ ] **M2 — Talk (keystone):** `/agent/say` (text → mind → behavior + reply), `/mode`.
-- [ ] **M3 — Play:** `/sensor` (phone-wand ingest), `/dance` beat-sync (`{bpm, style}`).
-- [ ] **M4 — Calm:** `/breathe`, `/led` (mood color), meditation `/mode`.
-- [ ] **Cleanup:** delete `bridge/` once `/feed` ships; add `/routine` (move sequences).
+- [ ] **★ 1 · Spell** (`POST /sensor/spell`, `module-wand-hash`) — deterministic gesture→trick.
+      **Top priority.** Independent: needs only the existing trick path + a pure hash engine —
+      **no AI, no mind, buildable now.** *(full "wand mode" integration later, with the mode machine)*
+- [ ] **2 · See & sense** — `/feed` camera + `/ws/state` aura; then **retire `bridge/`**. *(P1)*
+- [ ] **3 · Vision modes** — the mode machine (`POST /mode`) + `personal` (emotional mirror) +
+      `find` (vision servoing). Need the mind's vision wrapper, **not** the Realtime session.
+- [ ] **4 · Talk (Realtime) — last** — body-hosted Realtime voice brain (`/agent/say` = text
+      fallback). Unlocks the features that depend on it: `friend` (spoken step-nav) and voice-guided
+      **Calm** (`/breathe` + `/led`).

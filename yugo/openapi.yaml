@@ -127,8 +127,11 @@ tags:
       `/ws/state` WebSocket that drives the app's "aura".
   - name: agent
     description: |
-      Yugo's brain. These routes DELEGATE to the cloud mind (OpenAI), then apply
-      the returned behavior locally on the robot.
+      Yugo's conversational brain. The primary path is a **body-hosted OpenAI Realtime
+      session** (voice in/out + tool calls that execute **in-process** against the
+      controllers — see `prd/module-realtime-session.md`); the cloud is only a thin
+      STT/vision context wrapper. `POST /agent/say` here is the **text-only fallback**
+      into that same persona + tool layer.
   - name: sensor
     description: |
       Inbound sensor ingest — the phone acting as a "wand" (magnetometer / IMU /
@@ -733,7 +736,7 @@ paths:
         **PLANNED.**
 
         **What it does:** sets Yugo's front lamp via the VUI topic — a solid
-        mood `color` or a named `effect` (e.g. a Ghost-mode strobe).
+        mood `color` or a named `effect` (e.g. a strobe effect).
 
         **Execution:** local over WebRTC (VUI topic publish).
 
@@ -763,7 +766,7 @@ paths:
                 - required: [effect]
             examples:
               moodColor: { value: { color: "#33ccff" } }
-              ghostStrobe: { value: { effect: "strobe" } }
+              strobe: { value: { effect: "strobe" } }
       responses:
         '200':
           description: Lamp updated.
@@ -808,9 +811,9 @@ paths:
               properties:
                 mode:
                   type: string
-                  enum: [creature, ghost, hunt, scanner, music, meditation]
+                  enum: [creature, personal, friend, find, wand, meditation]
             examples:
-              ghost: { value: { mode: "ghost" } }
+              personal: { value: { mode: "personal" } }
       responses:
         '200':
           description: Mode set.
@@ -823,9 +826,9 @@ paths:
                     properties:
                       mode:
                         type: string
-                        enum: [creature, ghost, hunt, scanner, music, meditation]
+                        enum: [creature, personal, friend, find, wand, meditation]
               examples:
-                ok: { value: { ok: true, mode: "ghost" } }
+                ok: { value: { ok: true, mode: "personal" } }
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -978,10 +981,15 @@ paths:
     post:
       tags: [agent]
       operationId: postAgentSay
-      summary: Forward an utterance to the cloud agent (PLANNED)
+      summary: Text fallback into the body-hosted Realtime brain (PLANNED)
       x-execution: delegates-to-mind
       description: |
         **PLANNED.**
+
+        > **Design note:** the primary "talk" path is now a **body-hosted OpenAI Realtime
+        > session** (voice + in-process tool calls — see `prd/module-realtime-session.md`).
+        > This route is the **text-only fallback** into that same persona + tool layer:
+        > reasoning is cloud (OpenAI), but tool execution runs in-process on the body.
 
         **What it does:** forwards a recognized utterance `text` (from the app's
         Deepgram STT) plus context (recent detections, mood, state) to the cloud
@@ -1084,10 +1092,11 @@ paths:
     post:
       tags: [sensor]
       operationId: postSensor
-      summary: Ingest phone "wand" sensor readings (PLANNED)
+      summary: Ingest phone "wand" sensor readings
       x-execution: local
       description: |
-        **PLANNED.**
+        **IMPLEMENTED** (hub `SensorRouter`) — minimal for now: validates and keeps
+        the latest reading on `app.state`; richer reactions are planned.
 
         **What it does:** ingests a reading from the phone acting as a "wand" —
         magnetometer, accelerometer, ambient light, and an optional discrete
@@ -1130,6 +1139,52 @@ paths:
               schema: { $ref: '#/components/schemas/OkResponse' }
               examples:
                 ok: { value: { ok: true } }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /sensor/spell:
+    post:
+      tags: [sensor]
+      operationId: postSensorSpell
+      summary: Cast a spell — magnetometer trace → deterministic trick
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `SensorRouter` + `SensorController` hash engine).
+
+        **What it does:** the ★ wand mechanic. Takes the **magnetometer trace** of
+        one phone gesture (press → sweep → release), normalizes it, extracts
+        quantized features, hashes them to a stable bucket (`sha256` — not Python's
+        salted `hash()`), looks the bucket up in a fixed trick table, and fires that
+        `SPORT_CMD` move on Yugo. **Deterministic:** the same trace always casts the
+        same trick.
+
+        **Execution:** local, body-only — no AI, no cloud. The match is computed
+        **always** (even offline); the trick fires over WebRTC only when the dog is
+        connected (`fired:false` offline).
+
+        **Side effects:** Yugo performs the matched trick (clear space). Fires
+        through the trick path (BalanceStand precondition for expressive moves).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpellTrace' }
+            examples:
+              sweep:
+                summary: ~1 s magnetometer sweep sampled at 50 Hz
+                value:
+                  source: "phone-wand"
+                  sample_hz: 50
+                  magnetometer: [[0, 12.3, -4.1, 40.2], [20, 12.6, -3.9, 40.5], [40, 13.0, -3.6, 41.0], [60, 13.4, -3.2, 41.6]]
+      responses:
+        '200':
+          description: Spell matched (and fired if the dog is connected).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpellResult' }
+              examples:
+                cast:
+                  value: { ok: true, matched: { bucket: 2, move: "Stretch", api_id: 1017 }, fired: true }
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -1521,7 +1576,7 @@ components:
             gz: { type: number }
         mode:
           type: string
-          enum: [creature, ghost, hunt, scanner, music, meditation]
+          enum: [creature, personal, friend, find, wand, meditation]
         mood:
           $ref: '#/components/schemas/MoodState'
         detections:
@@ -1538,8 +1593,8 @@ components:
 
     SensorReading:
       type: object
-      description: A phone "wand" sensor reading.
-      required: [source, ts]
+      description: A phone "wand" sensor reading (continuous ingest).
+      required: [source]
       properties:
         source:
           type: string
@@ -1560,7 +1615,59 @@ components:
           description: Optional discrete gesture, e.g. "wave", "flick", "hold".
         ts:
           type: number
-          description: Client timestamp (epoch seconds, float).
+          description: Optional client timestamp (epoch seconds, float).
+
+    SpellTrace:
+      type: object
+      description: |
+        The magnetometer trace of one wand gesture (press → sweep → release), sent
+        to `POST /sensor/spell`. Each sample is `[t_ms, x, y, z]` (ms since hold
+        start; magnetometer µT).
+      required: [magnetometer]
+      properties:
+        source:
+          type: string
+          description: Sending node, e.g. "phone-wand".
+        sample_hz:
+          type: number
+          description: Sampling rate used during the hold (e.g. 50).
+        magnetometer:
+          type: array
+          description: Trace samples `[t_ms, x, y, z]` (µT). 4–2000 samples.
+          minItems: 4
+          maxItems: 2000
+          items:
+            type: array
+            items: { type: number }
+            minItems: 4
+            maxItems: 4
+        accel:
+          type: array
+          description: Optional accelerometer trace `[t_ms, x, y, z]` (m/s²); not yet hashed.
+          items:
+            type: array
+            items: { type: number }
+            minItems: 4
+            maxItems: 4
+
+    SpellResult:
+      type: object
+      description: The trick a wand gesture matched, and whether it fired on the dog.
+      required: [ok, matched, fired]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        matched:
+          type: object
+          required: [bucket, move, api_id]
+          properties:
+            bucket: { type: integer, description: Stable hash bucket the trace fell into. }
+            move: { type: string, description: The matched SPORT_CMD move name. }
+            api_id: { type: integer, description: The SPORT_CMD api_id for `move`. }
+        fired:
+          type: boolean
+          description: True if the trick was published to the dog (false when offline).
 
     AgentReply:
       type: object
