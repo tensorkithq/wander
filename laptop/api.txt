@@ -1,0 +1,118 @@
+==============================================================================
+YUGO BODY API — routes, routing model, and curl reference
+App: yugo.main:app  ·  Base URL: http://localhost:8080  ·  Updated: 2026-05-29
+Source of truth: generated from the live app (FastAPI route table), not grep.
+==============================================================================
+
+HOW TO START THE SERVER
+-----------------------
+  cd /Users/0x/srv/dimos
+
+  # A) OFFLINE — no dog. Reflex layer + catalogs work (200); tricks 503. For tests/dev.
+  YUGO_NO_ROBOT=1 .venv/bin/uvicorn yugo.main:app --port 8080
+
+  # B) WITH ROBOT — real Yugo on the floor, ~2 m clear (connecting engages AI motion mode).
+  ROBOT_IP=192.168.203.75 .venv/bin/uvicorn yugo.main:app --host 0.0.0.0 --port 8080 --reload \
+    2>&1 | jq -R 'fromjson? // .'
+
+  Notes:
+  - ROBOT_IP is DHCP — re-discover each session (ping/arp or the Unitree app).
+  - --reload = dev auto-restart on file save.
+  - LOGS: uvicorn + DimOS logs are PLAIN TEXT, not JSON. A bare `| jq` chokes on every
+    line. `jq -R 'fromjson? // .'` is the tolerant form: pretty-prints JSON lines, passes
+    plain lines through. For real structured JSON logs, add a JSON log formatter
+    (uvicorn --log-config or structlog) — not yet wired.
+
+ROUTING MODEL (why control/system are at root, owners/moods are under /api)
+---------------------------------------------------------------------------
+  Path = (APIRouter prefix) + (decorator path).  main.py includes every router with NO
+  prefix, so the prefix is whatever each router sets in its APIRouter(...) constructor:
+    SystemRouter : APIRouter(tags=["system"])               -> no prefix -> ROOT
+    ControlRouter: APIRouter(tags=["control"])              -> no prefix -> ROOT
+    OwnerRouter  : APIRouter(prefix="/api/owners", ...)     -> /api/owners/...
+    MoodRouter   : APIRouter(prefix="/api/moods",  ...)     -> /api/moods/...
+
+AUTHORITATIVE ROUTE TABLE
+-------------------------
+  system   GET  /healthz                 liveness + connection/robot_ip
+  system   GET  /tricks                  all 49 SPORT_CMD move names
+  control  GET  /actions                 8 friendly actions + resolved api_ids (offline-ok)
+  control  GET  /state                   live deadman/motion state
+  control  POST /up /down /left /right    nav nudge: drives for the deadman window, auto-stops
+  control  POST /cmd_vel                  raw teleop {vx,vy,wz}, clamped, deadman-guarded
+  control  POST /stop                     panic stop: zero held velocity + push zero
+  control  POST /hello /wiggle /heart /sit /standup /standdown /stretch /dance   expressive actions
+  control  POST /trick/{name}             escape hatch: any SPORT_CMD move by name
+  memory   POST /api/owners/   GET /api/owners/   GET|PUT|DELETE /api/owners/{owner_id}
+  memory   POST /api/moods/    GET /api/moods/
+
+  Friendly action -> SPORT_CMD move:
+    hello=Hello  wiggle=WiggleHips  heart=FingerHeart  sit=Sit  standup=StandUp
+    standdown=StandDown  stretch=Stretch  dance=Dance1
+
+WHICH ROUTES NEED THE ROBOT
+---------------------------
+  Work in BOTH modes (offline returns 200): /healthz /tricks /actions /state
+    /up /down /left /right /cmd_vel /stop  (reflex layer — computed locally; publishes to
+    the dog only while connected, so the deadman is always observable).
+  Need the robot (503 in offline mode): all expressive actions + /trick/{name}
+    (their catalog /actions /tricks is still inspectable offline).
+
+CURL REFERENCE
+--------------
+  # system + catalogs (both modes)
+  curl -s localhost:8080/healthz
+  curl -s localhost:8080/tricks
+  curl -s localhost:8080/actions
+
+  # reflex layer (both modes; 200 even offline)
+  curl -s localhost:8080/state
+  curl -s -X POST localhost:8080/up
+  curl -s -X POST localhost:8080/down
+  curl -s -X POST localhost:8080/left
+  curl -s -X POST localhost:8080/right
+  curl -s -X POST localhost:8080/cmd_vel -H 'content-type: application/json' \
+       -d '{"vx":0.3,"vy":0.0,"wz":0.5}'
+  curl -s -X POST localhost:8080/stop
+
+  # SEE THE DEADMAN FIRE (offline-friendly)
+  curl -s -X POST localhost:8080/up      # set forward intent
+  curl -s localhost:8080/state           # moving:true, vx≈step, last_cmd_age_s small
+  sleep 1                                # wait > deadman_window (see /state; ~0.4s)
+  curl -s localhost:8080/state           # vx -> 0 (effective), moving:false; raw_vx unchanged
+  # gap between vx (effective) and raw_vx (last commanded) = the deadman working.
+
+  # expressive actions / tricks (mode B only)
+  curl -s -X POST localhost:8080/hello
+  curl -s -X POST localhost:8080/wiggle
+  curl -s -X POST localhost:8080/heart
+  curl -s -X POST localhost:8080/sit
+  curl -s -X POST localhost:8080/stretch
+  curl -s -X POST localhost:8080/dance
+  curl -s -X POST localhost:8080/trick/BalanceStand
+  curl -s -X POST localhost:8080/trick/MoonWalk
+
+  # memory (SQLite) — bodies per OwnerSchema / MoodSchema
+  curl -s localhost:8080/api/owners/
+  curl -s localhost:8080/api/moods/
+
+SCHEMAS (key ones)
+------------------
+  Velocity (POST /cmd_vel):  {vx: fwd+/back-, vy: left+/right- strafe, wz: yaw CCW+}
+                             clamped server-side to ±0.6 m/s, ±1.2 rad/s.
+  MoveResult (nav/cmd_vel):  {action, vx, vy, wz, duration_s}  duration_s = deadman window.
+  MotionState (/state):      {moving, vx, vy, wz (effective), raw_vx, raw_vy, raw_wz,
+                              last_cmd_age_s, deadman_window, connected}
+
+GOTCHAS (live findings)
+-----------------------
+  1. DEADMAN governs ONLY velocity (cmd_vel/nav), never tricks. Tricks are one-shot
+     SPORT_MOD actions (fire-and-forget); the deadman never interrupts them.
+  2. VELOCITY-LOOP vs TRICK: in mode B the MotionController loop re-publishes the
+     effective velocity at publish_hz — including move(0,0,0) when idle. A trick fired
+     while that loop runs can be clobbered by the zero-velocity stream. (Tricks were clean
+     under the thin validate_api.py, which has no such loop.) FIX PENDING: publish only
+     while a command is fresh + suspend the loop for a trick's duration.
+  3. EXPRESSIVE MOVES need an upright precondition: POST /trick/BalanceStand then /wiggle.
+  4. A 200 from a trick = PUBLISHED, not EXECUTED (no exec ack). Trust /state + the dog.
+==============================================================================
