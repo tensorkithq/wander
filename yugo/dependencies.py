@@ -24,3 +24,16 @@ def get_robot(request: Request):
     if conn is None or not conn.connection_ready.is_set():
         raise HTTPException(503, f"robot not connected (ROBOT_IP={settings.robot.ip})")
     return conn
+
+
+def get_motion(request: Request):
+    """Yield the local MotionController (the deadman/teleop reflex layer).
+
+    Unlike `get_robot`, this never 503s on a missing dog: the deadman/nav state
+    machine runs locally so the body stays controllable/observable even with the
+    link down (it publishes to the dog only while connected).
+    """
+    motion = getattr(request.app.state, "motion", None)
+    if motion is None:
+        raise HTTPException(503, "motion controller not initialized")
+    return motion

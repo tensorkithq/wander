@@ -30,8 +30,15 @@ class RobotConfig(BaseModel):
 
 
 class MotionConfig(BaseModel):
-    max_linear: float = 0.6
-    max_angular: float = 1.2
+    max_linear: float = 0.6  # m/s clamp on vx / vy
+    max_angular: float = 1.2  # rad/s clamp on wz
+    # The deadman window AND the timed-nudge duration are one value: a single
+    # nav/cmd_vel call drives for `command_timeout` seconds, then the body
+    # auto-zeroes (safe stop). Re-poking within the window extends it.
+    command_timeout: float = 0.5
+    publish_hz: float = 20.0  # how often the held velocity is (re)sent to the dog
+    linear_step: float = 0.4  # forward/back speed for /up,/down nudges (m/s)
+    angular_step: float = 0.8  # turn rate for /left,/right nudges (rad/s)
 
 
 class Settings(BaseModel):
@@ -48,6 +55,9 @@ def _load_settings() -> Settings:
     # The dog's IP is DHCP; let the env var win for a moved/relocated robot.
     if os.environ.get("ROBOT_IP"):
         s.robot.ip = os.environ["ROBOT_IP"]
+    # Tests/dev shrink the deadman window so the HTTP suite runs fast.
+    if os.environ.get("YUGO_MOTION_TIMEOUT"):
+        s.motion.command_timeout = float(os.environ["YUGO_MOTION_TIMEOUT"])
     return s
 
 

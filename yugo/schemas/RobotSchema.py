@@ -25,3 +25,48 @@ class HealthStatus(BaseModel):
 
 class TricksResponse(BaseModel):
     tricks: List[str]
+
+
+class ActionInfo(BaseModel):
+    name: str  # friendly route name, e.g. "wiggle"
+    move: str  # canonical SPORT_CMD move, e.g. "WiggleHips"
+    api_id: int
+
+
+class ActionsResponse(BaseModel):
+    actions: List[ActionInfo]
+
+
+class Velocity(BaseModel):
+    """Raw teleop command. Missing fields default to 0; values are clamped."""
+
+    vx: float = 0.0  # forward (+) / back (-), m/s
+    vy: float = 0.0  # left (+) / right (-) strafe, m/s
+    wz: float = 0.0  # yaw rate (CCW +), rad/s
+
+
+class MoveResult(BaseModel):
+    """Echoes the velocity the body accepted (post-clamp) for a nav/teleop call."""
+
+    ok: bool = True
+    action: str
+    vx: float
+    vy: float
+    wz: float
+    duration_s: float  # how long this nudge holds before the deadman zeroes it
+    connected: bool
+
+
+class MotionState(BaseModel):
+    """Live motion/deadman state — the deadman is observable here over HTTP."""
+
+    moving: bool
+    vx: float  # deadman-adjusted (effective) velocity right now
+    vy: float
+    wz: float
+    raw_vx: float  # last commanded velocity, before the deadman window is applied
+    raw_vy: float
+    raw_wz: float
+    last_cmd_age_s: Optional[float] = None
+    deadman_window: float
+    connected: bool

@@ -14,11 +14,28 @@
 # its description whether it runs over WebRTC on the robot or calls the cloud.
 #
 # Source files this spec documents:
-#   yugo/ (main.py + routers/SystemRouter,ControlRouter)
-#                  -> /healthz, /tricks, /trick/{name}, /hello, /stop  (port 8080)
-#   yugo/bridge/web_bridge.py
-#                  -> /healthz, /debug, /cmd_vel, /stop, /video_feed/color_image (port 5555)
+#   yugo/ (main.py + routers/SystemRouter,ControlRouter)   [port 8080, CANONICAL]
+#     system  -> /healthz, /tricks
+#     actions -> /actions, /hello, /wiggle, /heart, /sit, /standup, /standdown,
+#                /stretch, /dance, /trick/{name}     (need the robot; 503 offline)
+#     reflex  -> /up, /down, /left, /right, /cmd_vel, /stop, /state
+#                (LOCAL deadman-guarded teleop; work offline, publish if connected)
+#   yugo/bridge/web_bridge.py                          [port 5555, DEPRECATED]
+#     -> /healthz, /debug, /cmd_vel, /stop, /video_feed/color_image
+#        (legacy DimOS camera+teleop bridge with its own 0.4 s deadman loop)
 # Everything else is PLANNED (target surface per prd/architecture-body.md).
+#
+# NOTE (reconciled 2026-05-29): the offline control surface — expressive actions,
+# keyboard nav, and the deadman-guarded teleop — is now UNIFIED on the hub
+# (port 8080) as one router. The deadman + /cmd_vel formerly lived only on the
+# WebBridge; the hub is now canonical.
+#
+# DEPRECATION (this release): yugo/bridge/web_bridge.py is DEPRECATED. Its teleop
+# /cmd_vel + /stop + deadman are superseded by the hub. Only the MJPEG camera
+# (/video_feed/color_image) has no hub equivalent yet — that capability is the
+# sole remaining reason to run the bridge, and it will move to the hub
+# (telemetry) before the bridge is removed. Do not build new clients against
+# :5555. See yugo/bridge/web_bridge.py header for the migration map.
 # =============================================================================
 
 openapi: 3.1.0
@@ -69,9 +86,12 @@ info:
 
 servers:
   - url: http://localhost:8080
-    description: yugo.main:app — structured body API (default port 8080).
+    description: yugo.main:app — canonical body API (default port 8080).
   - url: http://localhost:5555
-    description: yugo/bridge/web_bridge.py — WebBridge camera + teleop bridge (default port 5555).
+    description: |
+      DEPRECATED — yugo/bridge/web_bridge.py WebBridge (default port 5555). Its
+      teleop/deadman are superseded by the hub (:8080); only the MJPEG camera
+      remains. Do not target this server for new clients.
 
 # No auth: empty security requirement object => the API may be called with no
 # credentials. Declared at the document level so it applies to every operation.
@@ -83,9 +103,24 @@ tags:
     description: Liveness, capability discovery, and connection health.
   - name: control
     description: |
-      Local motion & expression. Every route here EXECUTES ON THE ROBOT over the
-      WebRTC LocalSTA link. All motion paths are subject to the deadman watchdog
-      and velocity clamps. `POST /stop` cancels any running routine immediately.
+      Local motion & expression, unified on the hub as one router. Two layers
+      with different safety stances:
+
+      - **Expressive actions** (`/hello`, `/wiggle`, `/heart`, `/sit`,
+        `/standup`, `/standdown`, `/stretch`, `/dance`, `/trick/{name}`) EXECUTE
+        ON THE ROBOT over WebRTC and require the link — they return `503` when
+        the dog is disconnected (hard constraint #2). Their name→api_id mapping
+        is discoverable offline via `GET /actions`.
+      - **Reflex teleop** (`/up`, `/down`, `/left`, `/right`, `/cmd_vel`,
+        `/stop`) is the LOCAL deadman/nav state machine. It always responds
+        `200` and publishes to the dog only while connected, so the body stays
+        controllable and the deadman stays observable (`GET /state`) even with
+        the link down.
+
+      All motion is velocity-clamped and deadman-guarded. Nav is a timed nudge:
+      one call drives for the deadman window (`command_timeout`, default 0.5 s),
+      then auto-zeroes; re-call within the window to keep moving. `POST /stop`
+      zeroes immediately.
   - name: telemetry
     description: |
       Live state and media out of the body — the camera MJPEG stream and the
@@ -115,33 +150,30 @@ paths:
       summary: Liveness + live WebRTC connection health
       x-execution: local
       description: |
-        **IMPLEMENTED** (validate_api.py and web_bridge.py both expose this).
+        **IMPLEMENTED** (hub `SystemRouter`; the deprecated WebBridge also
+        exposes a `/healthz` with `have_frame`/`last_cmd_age_s`).
 
         **What it does:** returns the body's liveness plus the **live** state of
         the WebRTC link to Yugo. This is a read-only status probe and has **no
         side effects** on the robot.
 
         **Execution:** local. It inspects the in-process WebRTC connection /
-        data-channel state and the deadman timer; it does not call the cloud.
+        data-channel state; it does not call the cloud.
 
         **Critical contract (hard constraint #2):** the data channel can drop
-        mid-session and does not self-heal, so `connected` / `channel` MUST
-        reflect the *current* channel state — not merely that the initial
-        handshake once succeeded. The body auto-reconnects in the background;
-        clients should poll this and treat motion routes as unavailable (`503`)
-        while `connected` is false.
-
-        - `last_cmd_age_s` is the age of the most recent `/cmd_vel`; if it
-          exceeds the deadman window (0.4 s) the publish loop is sending a zero
-          Twist (safe stop).
-        - `have_frame` indicates whether a camera frame has been received
-          (web_bridge only).
+        mid-session and does not self-heal, so `connected` MUST reflect the
+        *current* channel state — not merely that the initial handshake once
+        succeeded. The body auto-reconnects in the background; clients should
+        poll this and treat **expressive action** routes as unavailable (`503`)
+        while `connected` is false. (Reflex teleop stays `200` regardless — see
+        `GET /state`.)
 
         **Latency:** sub-millisecond (in-memory).
 
-        > Note: `validate_api.py` currently returns the minimal shape
-        > `{ok, robot_ip, connected}`; the canonical/target shape adds the live
-        > channel + deadman fields described by `HealthStatus`.
+        > The hub returns `{ok, robot_ip, connected}`. Motion/deadman fields
+        > (`last_cmd_age_s`, effective velocity, deadman window) live on
+        > `GET /state`. The `channel`/`have_frame` fields are
+        > deprecated-WebBridge/planned and not part of the hub shape.
       responses:
         '200':
           description: Body is alive. Inspect fields for live robot/channel state.
@@ -151,23 +183,23 @@ paths:
                 $ref: '#/components/schemas/HealthStatus'
               examples:
                 connected:
-                  summary: Channel up, recent command
+                  summary: Channel up
                   value:
                     ok: true
                     robot_ip: "192.168.203.75"
                     connected: true
-                    channel: "open"
-                    have_frame: true
-                    last_cmd_age_s: 0.12
-                channel_dropped:
+                dropped:
                   summary: Handshake done but data channel dropped (auto-reconnecting)
                   value:
                     ok: true
                     robot_ip: "192.168.203.75"
                     connected: false
-                    channel: "closed"
-                    have_frame: true
-                    last_cmd_age_s: 3.4
+                offline:
+                  summary: Running offline (YUGO_NO_ROBOT) — reflex layer still live
+                  value:
+                    ok: true
+                    robot_ip: "192.168.203.75"
+                    connected: false
 
   /tricks:
     get:
@@ -176,12 +208,13 @@ paths:
       summary: List available SPORT_CMD move names
       x-execution: local
       description: |
-        **IMPLEMENTED** (validate_api.py).
+        **IMPLEMENTED** (hub `SystemRouter`).
 
         **What it does:** returns the sorted list of `SPORT_CMD` move names the
         robot understands (e.g. `Hello`, `WiggleHips`, `Stretch`, `FingerHeart`,
         `BalanceStand`, `RecoveryStand`, …). These are the valid values for the
-        `name` path parameter of `POST /trick/{name}`.
+        `name` path parameter of `POST /trick/{name}`. For the curated set of
+        friendly named action routes (and their api_ids), see `GET /actions`.
 
         **Execution:** local — reads the static `SPORT_CMD` table; no robot
         traffic, no side effects.
@@ -205,94 +238,438 @@ paths:
                     tricks: ["BalanceStand", "FingerHeart", "Hello", "RecoveryStand", "Stretch", "WiggleHips"]
 
   # ===========================================================================
-  # CONTROL  (all x-execution: local — runs on the robot over WebRTC)
+  # CONTROL — EXPRESSIVE ACTIONS  (x-execution: local; require the robot → 503)
+  # ===========================================================================
+  /actions:
+    get:
+      tags: [control]
+      operationId: getActions
+      summary: List the friendly named action routes
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`).
+
+        **What it does:** returns the curated set of friendly action routes
+        (`hello`, `wiggle`, `heart`, `sit`, `standup`, `standdown`, `stretch`,
+        `dance`) with the canonical `SPORT_CMD` move each maps to and its numeric
+        `api_id`. Each entry `name` is reachable as `POST /{name}`.
+
+        **Execution:** local — reads the static mapping; no robot traffic.
+        Works **offline** (no link required), so it is the offline-validatable
+        source of truth for the action→api_id contract.
+
+        **Latency:** sub-millisecond.
+      responses:
+        '200':
+          description: The friendly action catalog.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionsResponse' }
+              examples:
+                sample:
+                  value:
+                    actions:
+                      - { name: "hello", move: "Hello", api_id: 1016 }
+                      - { name: "wiggle", move: "WiggleHips", api_id: 1033 }
+                      - { name: "heart", move: "FingerHeart", api_id: 1036 }
+                      - { name: "sit", move: "Sit", api_id: 1009 }
+                      - { name: "standup", move: "StandUp", api_id: 1004 }
+                      - { name: "standdown", move: "StandDown", api_id: 1005 }
+
+  /hello:
+    post:
+      tags: [control]
+      operationId: postHello
+      summary: Wave hello (fires SPORT_CMD Hello)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action route — fires the
+        `Hello` move. `Hello` works from most states (no BalanceStand
+        precondition). See the shared action contract below.
+
+        **Action route contract (shared by all named actions):**
+        - No request body. Publishes the mapped `SPORT_CMD` over WebRTC.
+        - `ok` ≠ executed (hard constraint #3): `200` means PUBLISHED, not that
+          the dog executed it.
+        - Requires the link: returns `503` while disconnected (constraint #2).
+        - Expressive moves are gated behind an upright stance (constraint #1).
+      responses:
+        '200':
+          description: Move PUBLISHED (not necessarily executed).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "Hello", api_id: 1016 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /wiggle:
+    post:
+      tags: [control]
+      operationId: postWiggle
+      summary: Wiggle hips (fires SPORT_CMD WiggleHips)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `WiggleHips`.
+        Expressive: ignored unless upright (auto-`BalanceStand` gate, constraint
+        #1). See the action route contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "WiggleHips", api_id: 1033 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /heart:
+    post:
+      tags: [control]
+      operationId: postHeart
+      summary: Finger heart (fires SPORT_CMD FingerHeart)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `FingerHeart`.
+        Expressive (constraint #1). See the contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "FingerHeart", api_id: 1036 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /sit:
+    post:
+      tags: [control]
+      operationId: postSit
+      summary: Sit (fires SPORT_CMD Sit)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `Sit`. Posture
+        change. See the contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "Sit", api_id: 1009 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /standup:
+    post:
+      tags: [control]
+      operationId: postStandUp
+      summary: Stand up (fires SPORT_CMD StandUp)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `StandUp`. Posture
+        change (a safe local command). See the contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "StandUp", api_id: 1004 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /standdown:
+    post:
+      tags: [control]
+      operationId: postStandDown
+      summary: Stand down / lie (fires SPORT_CMD StandDown)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `StandDown`.
+        Posture change. See the contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "StandDown", api_id: 1005 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /stretch:
+    post:
+      tags: [control]
+      operationId: postStretch
+      summary: Stretch (fires SPORT_CMD Stretch)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Named action → `Stretch`.
+        Expressive (constraint #1). See the contract under `POST /hello`.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "Stretch", api_id: 1017 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  /dance:
+    post:
+      tags: [control]
+      operationId: postDance
+      summary: Dance (fires SPORT_CMD Dance1)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`) — named action → `Dance1`, a
+        canned dance move. See the action contract under `POST /hello`.
+
+        **PLANNED extension:** an optional `{bpm, style}` body for beat-synced
+        choreography (sequenced poses/heights synced to the beat the body holds,
+        running as a routine until `POST /stop`). When that lands, a body-less
+        call keeps firing `Dance1`. All motion stays clamped/deadman-guarded.
+      responses:
+        '200':
+          description: Move PUBLISHED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrickResult' }
+              examples:
+                published: { value: { ok: true, move: "Dance1", api_id: 1022 } }
+        '503':
+          $ref: '#/components/responses/RobotNotConnected'
+
+  # ===========================================================================
+  # CONTROL — REFLEX TELEOP  (x-execution: local; deadman-guarded, work offline)
   # ===========================================================================
   /cmd_vel:
     post:
       tags: [control]
       operationId: postCmdVel
-      summary: Velocity teleop (clamped, deadman-guarded)
+      summary: Raw velocity teleop (clamped, deadman-guarded)
       x-execution: local
       description: |
-        **IMPLEMENTED** (web_bridge.py).
+        **IMPLEMENTED** (hub `ControlRouter`; also on the deprecated WebBridge).
 
-        **What it does:** sets the target body velocity. The body re-publishes
-        the latest command to the robot's `cmd_vel` at ~20 Hz.
+        **What it does:** sets the target body velocity as the held command.
+        While connected, the body re-publishes the *effective* (deadman-adjusted)
+        velocity to the robot at `publish_hz` (~20 Hz).
 
-        **Execution:** local — Twist published over WebRTC LocalSTA.
+        **Execution:** local — published over WebRTC LocalSTA when connected.
+        This is reflex layer: it responds `200` even **offline** (no link), so
+        the deadman/state machine stays controllable; it simply does not reach
+        the dog (`connected:false` in the response). Inspect `GET /state`.
 
-        **Side effects:** Yugo MOVES. Ensure clear space.
+        **Side effects:** Yugo MOVES (when connected). Ensure clear space.
 
         **Safety:**
         - **Clamps:** `vx`/`vy` to ±0.6 m/s, `wz` to ±1.2 rad/s. Out-of-range
-          values are clamped, not rejected.
-        - **Deadman watchdog:** if no `/cmd_vel` arrives within **0.4 s** the
-          publish loop sends a zero Twist (auto-stop). Clients must send at a
-          steady cadence (e.g. 10–20 Hz) to keep moving.
+          values are clamped, not rejected — the response echoes the accepted
+          (clamped) values.
+        - **Deadman watchdog:** the held command is honoured only while younger
+          than `command_timeout` (**default 0.5 s**); past the window the body
+          goes to zero (safe stop). Re-send at a steady cadence to keep moving.
 
-        **Latency:** LAN-local, a few ms to enqueue; motion applied on the next
-        publish tick.
+        **Latency:** LAN-local, a few ms; motion applied on the next publish tick.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Twist'
+              $ref: '#/components/schemas/Velocity'
             examples:
               forward:
                 summary: Drive forward, gentle left turn
                 value: { vx: 0.3, vy: 0.0, wz: 0.4 }
       responses:
         '200':
-          description: Command accepted (values clamped server-side).
+          description: Command accepted; response echoes the clamped velocity.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/OkResponse' }
+              schema: { $ref: '#/components/schemas/MoveResult' }
               examples:
-                ok: { value: { ok: true } }
-        '400':
-          description: Malformed JSON body.
+                clamped:
+                  summary: Out-of-range input clamped to the envelope
+                  value: { ok: true, action: "cmd_vel", vx: 0.6, vy: 0.0, wz: 1.2, duration_s: 0.5, connected: true }
+
+  /up:
+    post:
+      tags: [control]
+      operationId: postNavUp
+      summary: Nudge forward (keyboard nav)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`).
+
+        **What it does:** a timed-nudge forward step — sets `+vx` (=`linear_step`)
+        as the held velocity. The body drives for the deadman window
+        (`command_timeout`, default 0.5 s) then auto-zeroes; re-call within the
+        window (key-repeat / hold) to keep moving.
+
+        **Nav route contract (shared by `/up`,`/down`,`/left`,`/right`):**
+        reflex layer — always `200`, publishes only while connected, clamped and
+        deadman-guarded. Response is a `MoveResult` echoing the accepted velocity
+        and the `duration_s` the nudge holds. Observe live state via `GET /state`.
+      responses:
+        '200':
+          description: Nudge accepted.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/MoveResult' }
               examples:
-                bad: { value: { ok: false, error: "bad json" } }
-        '503':
-          $ref: '#/components/responses/RobotNotConnected'
+                up: { value: { ok: true, action: "up", vx: 0.4, vy: 0.0, wz: 0.0, duration_s: 0.5, connected: true } }
+
+  /down:
+    post:
+      tags: [control]
+      operationId: postNavDown
+      summary: Nudge backward (keyboard nav)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Timed-nudge `-vx`. See the nav
+        route contract under `POST /up`.
+      responses:
+        '200':
+          description: Nudge accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoveResult' }
+              examples:
+                down: { value: { ok: true, action: "down", vx: -0.4, vy: 0.0, wz: 0.0, duration_s: 0.5, connected: true } }
+
+  /left:
+    post:
+      tags: [control]
+      operationId: postNavLeft
+      summary: Nudge turn left / CCW (keyboard nav)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Timed-nudge `+wz` (yaw CCW,
+        =`angular_step`). See the nav route contract under `POST /up`.
+      responses:
+        '200':
+          description: Nudge accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoveResult' }
+              examples:
+                left: { value: { ok: true, action: "left", vx: 0.0, vy: 0.0, wz: 0.8, duration_s: 0.5, connected: true } }
+
+  /right:
+    post:
+      tags: [control]
+      operationId: postNavRight
+      summary: Nudge turn right / CW (keyboard nav)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`). Timed-nudge `-wz` (yaw CW). See
+        the nav route contract under `POST /up`.
+      responses:
+        '200':
+          description: Nudge accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoveResult' }
+              examples:
+                right: { value: { ok: true, action: "right", vx: 0.0, vy: 0.0, wz: -0.8, duration_s: 0.5, connected: true } }
 
   /stop:
     post:
       tags: [control]
       operationId: postStop
-      summary: Global stop → safe stance
+      summary: Panic stop (zero velocity immediately)
       x-execution: local
       description: |
-        **IMPLEMENTED** (web_bridge.py: zero velocity; validate_api.py:
-        `RecoveryStand` → `BalanceStand`).
+        **IMPLEMENTED** (hub `ControlRouter`; also on the deprecated WebBridge).
 
-        **What it does:** the global panic/stop. In the WebBridge it zeroes the
-        velocity command immediately; in the validator it issues
-        `RecoveryStand` then `BalanceStand` to bring the dog to a safe upright
-        stance. It also cancels any running routine (dance/breathe).
+        **What it does:** the always-available panic/stop. Immediately zeroes the
+        held velocity (and pushes a zero to the dog when connected), so the body
+        comes to rest at once rather than waiting out the deadman window.
 
-        **Execution:** local over WebRTC.
+        **Execution:** local. Reflex layer — responds `200` even **offline**
+        (it always zeroes local state; it reaches the dog only when connected).
 
-        **Side effects:** Yugo stops moving / returns to a stable stance.
+        **Side effects:** Yugo stops moving. (It does not change stance; use a
+        posture action such as `POST /standup` for that.)
 
-        **Safety:** this is the always-available safety command and should keep
-        working even when the mind is unreachable.
+        **Safety:** this is the highest-priority safety command and keeps working
+        even when the link or the mind is down.
 
-        **Latency:** immediate (next publish tick).
+        **Latency:** immediate.
       responses:
         '200':
-          description: Stop applied.
+          description: Stop applied (velocity zeroed).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/OkResponse' }
+              schema: { $ref: '#/components/schemas/MoveResult' }
               examples:
-                ok: { value: { ok: true } }
-        '503':
-          $ref: '#/components/responses/RobotNotConnected'
+                stopped: { value: { ok: true, action: "stop", vx: 0.0, vy: 0.0, wz: 0.0, duration_s: 0.5, connected: true } }
+
+  /state:
+    get:
+      tags: [telemetry]
+      operationId: getState
+      summary: Live motion + deadman state
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `ControlRouter`).
+
+        **What it does:** returns the body's live motion/deadman state. The
+        deadman is **observable here**: `vx`/`vy`/`wz` are the *effective*
+        (deadman-adjusted) velocity computed at read time, so once the window
+        (`deadman_window`) has elapsed since the last command they read `0` and
+        `moving` is `false`. `raw_*` is the last commanded velocity before the
+        window is applied; `last_cmd_age_s` is the age of that command (null if
+        none yet).
+
+        **Execution:** local, read-only, no robot traffic. Works offline.
+
+        **Latency:** sub-millisecond. Poll this to verify nav/teleop/deadman
+        behaviour over HTTP.
+      responses:
+        '200':
+          description: Live motion state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MotionState' }
+              examples:
+                moving:
+                  summary: Fresh command — body is moving
+                  value:
+                    moving: true
+                    vx: 0.4
+                    vy: 0.0
+                    wz: 0.0
+                    raw_vx: 0.4
+                    raw_vy: 0.0
+                    raw_wz: 0.0
+                    last_cmd_age_s: 0.12
+                    deadman_window: 0.5
+                    connected: true
+                deadman_zeroed:
+                  summary: Past the window — deadman has zeroed the body
+                  value:
+                    moving: false
+                    vx: 0.0
+                    vy: 0.0
+                    wz: 0.0
+                    raw_vx: 0.4
+                    raw_vy: 0.0
+                    raw_wz: 0.0
+                    last_cmd_age_s: 0.74
+                    deadman_window: 0.5
+                    connected: false
 
   /trick/{name}:
     post:
@@ -301,7 +678,8 @@ paths:
       summary: Fire a SPORT_CMD move
       x-execution: local
       description: |
-        **IMPLEMENTED** (validate_api.py — also accepts GET).
+        **IMPLEMENTED** (hub `ControlRouter`). Generic escape hatch for any move
+        not promoted to a friendly `/actions` route.
 
         **What it does:** publishes a single `SPORT_CMD` move (looked up by
         `name` against the `/tricks` table) to `RTC_TOPIC["SPORT_MOD"]`.
@@ -450,58 +828,6 @@ paths:
                 ok: { value: { ok: true, mode: "ghost" } }
         '422':
           $ref: '#/components/responses/ValidationError'
-        '503':
-          $ref: '#/components/responses/RobotNotConnected'
-
-  /dance:
-    post:
-      tags: [control]
-      operationId: postDance
-      summary: Beat-synced choreography (PLANNED)
-      x-execution: local
-      description: |
-        **PLANNED.**
-
-        **What it does:** starts a beat-synced pose/height choreography (or a
-        `SPORT_CMD` sequence) at the given `bpm` and `style`, so "Yugo dances to
-        the music." Runs as a routine on the body until `/stop` (or another
-        routine) is issued.
-
-        **Execution:** local — sequences poses/heights/tricks over WebRTC,
-        synchronized to the beat the body holds.
-
-        **Side effects:** sustained, rhythmic body motion. Requires clear space.
-
-        **Safety:** all motion goes through the velocity clamps; `POST /stop`
-        cancels the routine immediately. Expressive sub-moves are gated behind
-        the BalanceStand precondition (constraint #1).
-
-        **Latency:** starts within a beat; LAN-local trigger.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                bpm:
-                  type: number
-                  description: Beats per minute to sync to.
-                  minimum: 20
-                  maximum: 220
-                style:
-                  type: string
-                  description: Choreography style, e.g. "bounce", "sway", "pop".
-            examples:
-              bounce: { value: { bpm: 120, style: "bounce" } }
-      responses:
-        '200':
-          description: Dance routine started.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/OkResponse' }
-              examples:
-                ok: { value: { ok: true } }
         '503':
           $ref: '#/components/responses/RobotNotConnected'
 
@@ -970,9 +1296,10 @@ components:
     HealthStatus:
       type: object
       description: |
-        Liveness plus the LIVE WebRTC/robot state. `connected` and `channel`
+        Liveness plus the LIVE WebRTC/robot state (`GET /healthz`). `connected`
         MUST reflect the current data-channel state, not just the initial
-        handshake (hard constraint #2).
+        handshake (hard constraint #2). This is the hub shape; motion/deadman
+        fields live on `GET /state` (`MotionState`).
       required: [ok, connected]
       properties:
         ok:
@@ -987,21 +1314,21 @@ components:
         channel:
           type: string
           enum: [open, connecting, closed]
-          description: Live WebRTC data-channel state.
+          description: |
+            DEPRECATED-WebBridge / PLANNED — live data-channel state. Not part of
+            the hub `/healthz` shape.
         have_frame:
           type: boolean
-          description: Whether at least one camera frame has been received (web_bridge).
-        last_cmd_age_s:
-          type: [number, "null"]
           description: |
-            Seconds since the last `/cmd_vel`. Null if none yet. If it exceeds
-            the deadman window (0.4 s) the body is publishing a zero Twist.
+            DEPRECATED-WebBridge only — whether a camera frame has arrived. Not
+            part of the hub `/healthz` shape.
 
-    Twist:
+    Velocity:
       type: object
       description: |
-        Body velocity command. `vx`/`vy` are linear m/s (clamped ±0.6),
-        `wz` is yaw rate rad/s (clamped ±1.2). Missing fields default to 0.
+        Raw teleop command (the `POST /cmd_vel` body). `vx`/`vy` are linear m/s
+        (clamped ±0.6), `wz` is yaw rate rad/s (clamped ±1.2). Missing fields
+        default to 0.
       properties:
         vx:
           type: number
@@ -1015,6 +1342,89 @@ components:
           type: number
           description: Yaw rate (CCW +), rad/s. Clamped to ±1.2.
           default: 0.0
+
+    MoveResult:
+      type: object
+      description: |
+        Response of a reflex-teleop call (`/up`,`/down`,`/left`,`/right`,
+        `/cmd_vel`,`/stop`). Echoes the velocity the body ACCEPTED (post-clamp).
+      required: [ok, action, vx, vy, wz, duration_s, connected]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        action:
+          type: string
+          description: Which call produced this (e.g. "up", "cmd_vel", "stop").
+        vx:
+          type: number
+          description: Accepted forward velocity (clamped), m/s.
+        vy:
+          type: number
+          description: Accepted strafe velocity (clamped), m/s.
+        wz:
+          type: number
+          description: Accepted yaw rate (clamped), rad/s.
+        duration_s:
+          type: number
+          description: |
+            How long this command holds before the deadman zeroes it (the
+            `command_timeout` window; also the nudge duration). Re-call within it
+            to keep moving.
+        connected:
+          type: boolean
+          description: Whether the command actually reached the dog (live link).
+
+    MotionState:
+      type: object
+      description: |
+        Live motion + deadman state (`GET /state`). `vx`/`vy`/`wz` are the
+        EFFECTIVE (deadman-adjusted) velocity computed at read time; `raw_*` is
+        the last commanded velocity before the window is applied.
+      required: [moving, vx, vy, wz, raw_vx, raw_vy, raw_wz, deadman_window, connected]
+      properties:
+        moving:
+          type: boolean
+          description: True iff the effective velocity is non-zero right now.
+        vx: { type: number, description: Effective forward velocity, m/s. }
+        vy: { type: number, description: Effective strafe velocity, m/s. }
+        wz: { type: number, description: Effective yaw rate, rad/s. }
+        raw_vx: { type: number, description: Last commanded forward velocity, m/s. }
+        raw_vy: { type: number, description: Last commanded strafe velocity, m/s. }
+        raw_wz: { type: number, description: Last commanded yaw rate, rad/s. }
+        last_cmd_age_s:
+          type: [number, "null"]
+          description: Seconds since the last command. Null if none yet.
+        deadman_window:
+          type: number
+          description: The deadman/nudge window in seconds (`command_timeout`).
+        connected:
+          type: boolean
+          description: Live WebRTC connection state.
+
+    ActionInfo:
+      type: object
+      description: One friendly action route and the SPORT_CMD move it fires.
+      required: [name, move, api_id]
+      properties:
+        name:
+          type: string
+          description: Friendly route name, reachable as `POST /{name}` (e.g. "wiggle").
+        move:
+          type: string
+          description: Canonical SPORT_CMD move name (e.g. "WiggleHips").
+        api_id:
+          type: integer
+          description: Numeric SPORT_CMD api_id.
+
+    ActionsResponse:
+      type: object
+      description: The curated friendly action catalog (`GET /actions`).
+      required: [actions]
+      properties:
+        actions:
+          type: array
+          items: { $ref: '#/components/schemas/ActionInfo' }
 
     TrickResult:
       type: object
