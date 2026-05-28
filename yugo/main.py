@@ -6,9 +6,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from yugo.config import settings
+from yugo.config import Base, SessionLocal, engine, settings
+from yugo.controllers.MoodController import MoodLoop
 from yugo.controllers.MotionController import MotionController
-from yugo.routers import ControlRouter, MoodRouter, OwnerRouter, SystemRouter
+from yugo.routers import (
+    ControlRouter,
+    MoodRouter,
+    OwnerRouter,
+    SensorRouter,
+    SystemRouter,
+)
 
 _DOC_PATHS = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
 
@@ -61,7 +68,16 @@ async def lifespan(app: FastAPI):
     motion = MotionController(app.state.robot, settings.motion)
     motion.start()
     app.state.motion = motion
+
+    # Ensure DB tables exist (idempotent safety net; alembic owns schema evolution).
+    Base.metadata.create_all(bind=engine)
+    # Mood loop: picks a mood every settings.mood.update_seconds (demo: random),
+    # persists it to SQLite for the app to poll, and performs a per-mood gesture.
+    mood = MoodLoop(app.state.robot, motion, SessionLocal, settings.mood)
+    mood.start()
+    app.state.mood = mood
     yield
+    mood.stop_loop()
     motion.stop_loop()
     # robot background thread is a daemon; nothing else to tear down explicitly
 
@@ -79,6 +95,7 @@ app.add_middleware(
 
 app.include_router(SystemRouter.router)
 app.include_router(ControlRouter.router)
+app.include_router(SensorRouter.router)
 app.include_router(OwnerRouter.router)
 app.include_router(MoodRouter.router)
 
