@@ -1,0 +1,10 @@
+# Yugo robot connection + motion config. No secrets here.
+# The IP is DHCP on muShanghaiHub — re-discover with `dimos go2tool discover`
+# if it moves, or override at runtime with the ROBOT_IP env var.
+robot:
+  ip: "192.168.203.75"
+  connect_timeout: 25      # seconds to wait for the WebRTC channel to come up
+
+motion:
+  max_linear: 0.6          # m/s clamp on vx / vy
+  max_angular: 1.2         # rad/s clamp on wz
