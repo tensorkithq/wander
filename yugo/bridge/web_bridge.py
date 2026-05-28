@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+# =============================================================================
+# DEPRECATED (as of this commit / release, 2026-05-29).
+# -----------------------------------------------------------------------------
+# The WebBridge is superseded by the unified hub API (yugo/main.py, port 8080).
+# Do NOT build new clients or features against this module.
+#
+# Migration map (WebBridge :5555  ->  hub :8080):
+#   POST /cmd_vel   ->  POST /cmd_vel    (hub ControlRouter; returns MoveResult)
+#   POST /stop      ->  POST /stop       (hub ControlRouter)
+#   deadman loop    ->  yugo/controllers/MotionController.py (0.5 s window,
+#                       observable via GET /state; also powers /up,/down,/left,
+#                       /right keyboard nav)
+#   GET /healthz    ->  GET /healthz + GET /state (hub)
+#   GET /video_feed/color_image  ->  NO hub equivalent yet. This MJPEG stream is
+#                       the ONLY remaining reason to run the bridge; it will move
+#                       to the hub (telemetry) before this module is removed.
+# Contract: see yugo/openapi.yaml (the :5555 server is marked deprecated there).
+# =============================================================================
+#
 # Reality Instrument — laptop bridge module.
 #
 # A single DimOS Module that bridges the Go2 to a network client:
@@ -14,10 +33,20 @@ from __future__ import annotations
 
 import threading
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
 import asyncio
+
+warnings.warn(
+    "yugo.bridge.web_bridge (WebBridge, :5555) is DEPRECATED as of 2026-05-29 — "
+    "its teleop/deadman are superseded by the unified hub API (yugo.main, :8080). "
+    "Only the MJPEG camera stream has no hub equivalent yet. See the module "
+    "header for the migration map.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import cv2
 import uvicorn
