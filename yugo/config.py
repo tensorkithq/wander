@@ -54,9 +54,19 @@ class MotionConfig(BaseModel):
     walk_enter_settle_s: float = 1.5
 
 
+class MoodConfig(BaseModel):
+    # The body picks a mood every `update_seconds` and (demo) it's random until a
+    # vision source replaces it. `poll_seconds` is the cadence the mobile app
+    # should poll `GET /api/moods/current` at — advertised, not enforced.
+    update_seconds: float = 90.0
+    poll_seconds: float = 15.0
+    gesture_on_change: bool = True  # fire Yugo's per-mood gesture on each new mood
+
+
 class Settings(BaseModel):
     robot: RobotConfig = RobotConfig()
     motion: MotionConfig = MotionConfig()
+    mood: MoodConfig = MoodConfig()
 
 
 def _load_settings() -> Settings:
@@ -71,6 +81,9 @@ def _load_settings() -> Settings:
     # Tests/dev shrink the deadman window so the HTTP suite runs fast.
     if os.environ.get("YUGO_MOTION_TIMEOUT"):
         s.motion.command_timeout = float(os.environ["YUGO_MOTION_TIMEOUT"])
+    # Tests/dev shrink the mood interval to observe changes quickly.
+    if os.environ.get("YUGO_MOOD_SECONDS"):
+        s.mood.update_seconds = float(os.environ["YUGO_MOOD_SECONDS"])
     return s
 
 
