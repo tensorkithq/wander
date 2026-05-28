@@ -45,15 +45,21 @@ cd /Users/0x/srv/dimos
 # one-time / after model changes: apply DB migrations
 .venv/bin/alembic upgrade head
 
-# structured body API (health, tricks, actions, nav, deadman, owners, moods):
-ROBOT_IP=192.168.203.75 .venv/bin/uvicorn yugo.main:app --host 0.0.0.0 --port 8080
+# dev workflow (Makefile — pass the dog's IP, autoreload on save):
+make serve IP=192.168.202.107      # run against a robot
+make offline                       # no dog; reflex layer (nav/deadman/state) stays live
+make test                          # pytest (no robot needed)
+make migrate                       # alembic upgrade head
+
+# simple non-interactive run (default config, no reload) — handy for prod-ish/daemon:
+ROBOT_IP=192.168.202.107 .venv/bin/python -m yugo   # or YUGO_NO_ROBOT=1 for offline
+
+# fully explicit form (what `make serve` runs):
+ROBOT_IP=192.168.202.107 .venv/bin/uvicorn yugo.main:app --host 0.0.0.0 --port 8080 --reload
 #   curl -X POST localhost:8080/hello          # expressive action
 #   curl -X POST localhost:8080/up             # keyboard-nav nudge (deadman-guarded)
 #   curl localhost:8080/state                  # live motion/deadman state
 #   curl localhost:8080/api/owners/            # CRUD; no robot needed
-
-# run WITHOUT a dog (offline) — reflex layer (nav/deadman/state) stays live:
-#   YUGO_NO_ROBOT=1 .venv/bin/uvicorn yugo.main:app --port 8080
 
 # DEPRECATED teleop/camera bridge (run only for the MJPEG camera stream):
 .venv/bin/python yugo/bridge/run.py --robot-ip 192.168.203.75 --port 5555
