@@ -6,7 +6,6 @@ Source of truth: generated from the live app (FastAPI route table), not grep.
 
 HOW TO START THE SERVER
 -----------------------
-  cd /Users/0x/srv/dimos
 
   # A) OFFLINE — no dog. Reflex layer + catalogs work (200); tricks 503. For tests/dev.
   YUGO_NO_ROBOT=1 .venv/bin/uvicorn yugo.main:app --port 8080
