@@ -4,6 +4,34 @@ App: yugo.main:app  ·  Base URL: http://localhost:8080  ·  Updated: 2026-05-29
 Source of truth: generated from the live app (FastAPI route table), not grep.
 ==============================================================================
 
+CONNECT YUGO TO WIFI & GET ITS IP  (dimos go2tool, over BLE)
+-----------------------------------------------------------
+The Go2 IP is DHCP and changes between sessions. Provision the dog onto a wifi and
+find its IP with the `dimos go2tool` CLI (dog powered on + in BLE range):
+
+  # 1. Discover the dog over BLE (also shows it on the LAN if already connected)
+  dimos go2tool discover
+      SOURCE NAME        IP   MAC   SERIAL
+      BLE    Go2_49114   -    ...   B42D1000PC57CD8Y
+
+  # 2. Provision onto wifi over BLE — ONE SHOT, no prompt, when you pass a device
+  #    selector (--name | --serial | --mac) together with --ssid/--password.
+  #    USE PLACEHOLDERS for creds — do NOT commit real wifi credentials.
+  dimos go2tool connect-wifi --name Go2_49114 --ssid <SSID> --password <PASSWORD>
+  #   selector alternatives:  --serial B42D1000PC57CD8Y   |   --mac <BLE-MAC>
+  #   extras: --country (default US), --timeout, --retries.
+  #   Omit all selectors to fall back to the interactive picker.
+      handshake / read serial / init STA mode / set SSID / set password / set country US
+      ✓ Provisioned. Serial: B42D1000PC57CD8Y
+
+  # 3. Discover again — it now appears on the LAN with its IP
+  dimos go2tool discover
+      LAN    -   192.168.202.107   -   B42D1000PC57CD8Y      <- this IP is your ROBOT_IP
+
+  export ROBOT_IP=192.168.202.107        # then start the server (below)
+
+==============================================================================
+
 HOW TO START THE SERVER
 -----------------------
 
@@ -11,11 +39,10 @@ HOW TO START THE SERVER
   YUGO_NO_ROBOT=1 .venv/bin/uvicorn yugo.main:app --port 8080
 
   # B) WITH ROBOT — real Yugo on the floor, ~2 m clear (connecting engages AI motion mode).
-  ROBOT_IP=192.168.203.75 .venv/bin/uvicorn yugo.main:app --host 0.0.0.0 --port 8080 --reload \
-    2>&1 | jq -R 'fromjson? // .'
+  ROBOT_IP=192.168.202.107 .venv/bin/uvicorn yugo.main:app --host 0.0.0.0 --port 8080 --reload
 
   Notes:
-  - ROBOT_IP is DHCP — re-discover each session (ping/arp or the Unitree app).
+  - ROBOT_IP is DHCP — re-discover each session via `dimos go2tool discover` (see top).
   - --reload = dev auto-restart on file save.
   - LOGS: uvicorn + DimOS logs are PLAIN TEXT, not JSON. A bare `| jq` chokes on every
     line. `jq -R 'fromjson? // .'` is the tolerant form: pretty-prints JSON lines, passes
