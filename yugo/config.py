@@ -48,6 +48,10 @@ class MotionConfig(BaseModel):
     # Yugo is upright, so those tricks prepend BalanceStand and wait this long for
     # it to settle before firing the move.
     trick_balance_settle_s: float = 1.5
+    # On the first nudge of a drive, nav sends RecoveryStand to enter a walk gait
+    # (the joystick only walks in locomotion mode, not BalanceStand/posture). The
+    # velocity loop is muted this long while RecoveryStand settles.
+    walk_enter_settle_s: float = 1.5
 
 
 class Settings(BaseModel):

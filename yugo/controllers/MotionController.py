@@ -85,6 +85,8 @@ class MotionController:
         self._cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._cmd_ts: Optional[float] = None
         self._suspend_until: float = 0.0  # velocity loop muted until this monotonic time
+        self._walk_ready: bool = False  # have we entered a walk gait for this drive?
+        self._walk_enter_until: float = 0.0  # mute loop while RecoveryStand settles
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -100,6 +102,11 @@ class MotionController:
 
     def set_velocity(self, vx: float, vy: float, wz: float) -> tuple[float, float, float]:
         vx, vy, wz = clamp(vx, vy, wz, self._cfg.max_linear, self._cfg.max_angular)
+        # The WIRELESS_CONTROLLER joystick only WALKS in a locomotion gait; in
+        # BalanceStand/posture mode it just tilts the body. A trick leaves the dog
+        # in posture, so the first real nudge of a drive enters the walk gait.
+        if abs(vx) > 1e-9 or abs(vy) > 1e-9 or abs(wz) > 1e-9:
+            self._ensure_walk_mode()
         with self._lock:
             self._cmd = (vx, vy, wz)
             self._cmd_ts = time.monotonic()
@@ -133,6 +140,39 @@ class MotionController:
         dur = self._cfg.trick_suspend_s if seconds is None else seconds
         with self._lock:
             self._suspend_until = time.monotonic() + max(0.0, dur)
+            self._walk_ready = False  # a trick puts the dog back in posture mode
+
+    def _ensure_walk_mode(self) -> None:
+        """Enter a walk gait once per drive (idle→moving) via RecoveryStand.
+
+        The joystick only walks in a locomotion gait; in BalanceStand/posture mode
+        it tilts the body. Tricks (and connect) leave the dog in posture, so the
+        first real nudge sends RecoveryStand once to switch into the walk gait.
+        """
+        with self._lock:
+            if self._walk_ready:
+                return
+            self._walk_ready = True
+            # Mute the velocity loop while RecoveryStand executes so the joystick
+            # stream can't clobber it. Separate from the trick mute and NOT cleared
+            # by set_velocity, so concurrent re-pokes (keyboard hold) can't unmute
+            # it early; the loop resumes streaming velocity once it lapses.
+            self._walk_enter_until = time.monotonic() + self._cfg.walk_enter_settle_s
+        if not self._publish_sport("RecoveryStand"):
+            with self._lock:
+                self._walk_ready = False  # couldn't send (offline) — retry next nudge
+                self._walk_enter_until = 0.0
+
+    def _publish_sport(self, move: str) -> bool:
+        if not self.connected:
+            return False
+        try:
+            from unitree_webrtc_connect.constants import RTC_TOPIC, SPORT_CMD
+
+            self._conn.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": SPORT_CMD[move]})
+            return True
+        except Exception:
+            return False
 
     def _effective(self) -> tuple[tuple[float, float, float], Optional[float]]:
         with self._lock:
@@ -203,7 +243,7 @@ class MotionController:
         while not self._stop_event.is_set():
             now = time.monotonic()
             with self._lock:
-                suspended = now < self._suspend_until
+                suspended = now < self._suspend_until or now < self._walk_enter_until
             if not suspended:
                 eff, _ = self._effective()
                 self._publish(eff)  # eff is zero once the deadman window lapses
