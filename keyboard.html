@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Yugo — Keyboard Teleop</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; gap: 18px; padding: 28px 16px;
+    background: #0b0e14; color: #e6e9ef;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+  .sub { color: #8b93a7; font-size: 13px; margin-top: -10px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  input {
+    background: #141925; border: 1px solid #2a3242; color: #e6e9ef;
+    border-radius: 8px; padding: 7px 10px; font: inherit; width: 260px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; display: inline-block; }
+  .dot.on { background: #34d399; box-shadow: 0 0 8px #34d399; }
+  .dot.off { background: #f87171; }
+  .pad { display: grid; grid-template-columns: repeat(3, 78px); grid-template-rows: repeat(2, 78px);
+         gap: 10px; margin-top: 6px; }
+  .key {
+    border: 1px solid #2a3242; border-radius: 12px; background: #141925;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 22px; user-select: none; transition: all .08s; color: #cbd3e1;
+  }
+  .key small { font-size: 11px; color: #7a8298; margin-top: 2px; }
+  .key.active { background: #1f6feb; border-color: #3b82f6; color: #fff; box-shadow: 0 0 14px #1f6feb88; transform: translateY(1px); }
+  .key.up { grid-column: 2; grid-row: 1; }
+  .key.left { grid-column: 1; grid-row: 2; }
+  .key.down { grid-column: 2; grid-row: 2; }
+  .key.right { grid-column: 3; grid-row: 2; }
+  .stop {
+    margin-top: 4px; padding: 12px 28px; border-radius: 10px; border: 1px solid #7f1d1d;
+    background: #b91c1c; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .stop:active { background: #991b1b; }
+  pre {
+    background: #0f131c; border: 1px solid #1e2533; border-radius: 10px; padding: 12px 14px;
+    width: min(560px, 94vw); margin: 0; font-size: 13px; white-space: pre-wrap;
+    color: #aeb6c6; min-height: 88px;
+  }
+  .hint { color: #6b7280; font-size: 12px; max-width: 560px; text-align: center; }
+  b { color: #e6e9ef; }
+</style>
+</head>
+<body>
+  <h1>🐕 Yugo — Keyboard Teleop</h1>
+  <div class="sub">Hold <b>W A S D</b> or the <b>arrow keys</b> to drive · <b>Space</b> = stop · release = stop</div>
+
+  <div class="row">
+    <span class="dot" id="conn"></span>
+    <input id="base" value="http://localhost:8080" spellcheck="false" />
+    <span class="hint" id="connText">connecting…</span>
+  </div>
+
+  <div class="pad">
+    <div class="key up"    data-dir="up">▲<small>W / ↑</small></div>
+    <div class="key left"  data-dir="left">◀<small>A / ←</small></div>
+    <div class="key down"  data-dir="down">▼<small>S / ↓</small></div>
+    <div class="key right" data-dir="right">▶<small>D / →</small></div>
+  </div>
+
+  <button class="stop" id="stopBtn">■ STOP (space)</button>
+
+  <pre id="out">state…</pre>
+
+  <div class="hint">
+    Each nudge drives for the deadman window (~0.5&nbsp;s) then auto-stops; holding a key re-pokes it
+    every 150&nbsp;ms so motion is continuous, and releasing posts <b>/stop</b> (the deadman is the
+    backstop). One direction at a time — last key pressed wins.
+  </div>
+
+<script>
+const KEYMAP = {
+  w:"up", s:"down", a:"left", d:"right",
+  ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right",
+};
+const REPEAT_MS = 150;
+const base = () => document.getElementById("base").value.replace(/\/+$/, "");
+const out = document.getElementById("out");
+
+const held = [];          // keys currently down, in press order (last = active)
+let timer = null;
+let lastResp = null;
+
+function activeDir() {
+  for (let i = held.length - 1; i >= 0; i--) {
+    const d = KEYMAP[held[i]];
+    if (d) return d;
+  }
+  return null;
+}
+
+async function post(path) {
+  try {
+    const r = await fetch(base() + path, { method: "POST" });
+    lastResp = await r.json();
+  } catch (e) {
+    lastResp = { ok: false, error: String(e) };
+  }
+}
+
+function tick() {
+  const d = activeDir();
+  if (d) post("/" + d);
+}
+function ensureTimer() { if (!timer) { tick(); timer = setInterval(tick, REPEAT_MS); } }
+function stopTimer()   { if (timer) { clearInterval(timer); timer = null; } }
+
+function setActive(dir, on) {
+  document.querySelectorAll(`.key[data-dir="${dir}"]`).forEach(el => el.classList.toggle("active", on));
+}
+
+function panicStop() {
+  held.length = 0;
+  stopTimer();
+  document.querySelectorAll(".key").forEach(el => el.classList.remove("active"));
+  post("/stop");
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === " ") { e.preventDefault(); panicStop(); return; }
+  const dir = KEYMAP[e.key];
+  if (!dir) return;
+  e.preventDefault();                 // stop arrow-key page scroll
+  if (held.includes(e.key)) return;   // ignore OS auto-repeat
+  held.push(e.key);
+  setActive(dir, true);
+  ensureTimer();
+});
+
+window.addEventListener("keyup", (e) => {
+  const dir = KEYMAP[e.key];
+  if (!dir) return;
+  const i = held.indexOf(e.key);
+  if (i >= 0) held.splice(i, 1);
+  if (!held.some(k => KEYMAP[k] === dir)) setActive(dir, false);
+  if (held.length === 0) { stopTimer(); post("/stop"); }
+});
+
+window.addEventListener("blur", panicStop);   // lose focus -> stop (safety)
+document.getElementById("stopBtn").addEventListener("click", panicStop);
+
+// live /state + connection indicator
+async function poll() {
+  let s = null;
+  try { s = await (await fetch(base() + "/state")).json(); } catch (_) {}
+  const dot = document.getElementById("conn");
+  const txt = document.getElementById("connText");
+  if (s) {
+    const c = s.connected;
+    dot.className = "dot " + (c ? "on" : "off");
+    txt.textContent = c ? "robot connected" : "reachable, robot offline (503 on motion → dog)";
+    out.textContent =
+      `active: ${activeDir() || "—"}    held: [${held.join(",") || ""}]\n` +
+      `vx ${s.vx}  vy ${s.vy}  wz ${s.wz}   moving:${s.moving}\n` +
+      `raw  ${s.raw_vx}/${s.raw_vy}/${s.raw_wz}   age:${s.last_cmd_age_s}  window:${s.deadman_window}\n` +
+      `last response: ${lastResp ? JSON.stringify(lastResp) : "—"}`;
+  } else {
+    dot.className = "dot off";
+    txt.textContent = "no response from " + base() + " (is the server up?)";
+  }
+}
+setInterval(poll, 250);
+poll();
+</script>
+</body>
+</html>
