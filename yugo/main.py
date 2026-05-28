@@ -10,9 +10,32 @@ from yugo.config import settings
 from yugo.controllers.MotionController import MotionController
 from yugo.routers import ControlRouter, MoodRouter, OwnerRouter, SystemRouter
 
+_DOC_PATHS = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
+
+
+def _print_routes(app: FastAPI) -> None:
+    """List available routes on startup so the API surface is visible at a glance."""
+    from fastapi.routing import APIRoute, APIWebSocketRoute
+
+    rows: list[tuple[str, str]] = []
+    for r in app.routes:
+        if isinstance(r, APIWebSocketRoute):
+            rows.append(("WS", r.path))
+        elif isinstance(r, APIRoute) and r.path not in _DOC_PATHS:
+            methods = "|".join(
+                sorted(m for m in (r.methods or set()) if m not in {"HEAD", "OPTIONS"})
+            )
+            rows.append((methods, r.path))
+    rows.sort(key=lambda mp: mp[1])
+    width = max((len(m) for m, _ in rows), default=4)
+    print(f"[yugo] {len(rows)} routes available:")
+    for methods, path in rows:
+        print(f"[yugo]   {methods:<{width}}  {path}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _print_routes(app)
     # YUGO_NO_ROBOT=1 runs the body without a dog: the local reflex layer (nav,
     # deadman, /state) stays live for offline use and the HTTP test suite, while
     # robot-bound actions 503. Lets tests hit the *actual* API, not a mock.
