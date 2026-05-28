@@ -11,7 +11,9 @@ from yugo.config import settings
 # Expressive moves the dog ignores unless it is upright first; these prepend a
 # BalanceStand + settle. Keyed on the SPORT_CMD move name so /trick/{name} gets
 # it too, not just the friendly /wiggle, /heart, /stretch, /dance routes.
-NEEDS_BALANCE: set[str] = {"FingerHeart", "Stretch", "Dance1"}
+NEEDS_BALANCE: set[str] = {
+    "FingerHeart", "Stretch", "Dance1", "Dance2", "MoonWalk", "Pose", "Content",
+}
 
 # Friendly named actions -> canonical SPORT_CMD move. Each becomes a direct
 # `POST /<name>` route. Extend this dict to expose more (every key in SPORT_CMD
@@ -60,3 +62,13 @@ def stop(conn) -> dict:
     """Global stop → safe upright stance (RecoveryStand → BalanceStand)."""
     fire(conn, "RecoveryStand")
     return fire(conn, "BalanceStand")
+
+
+def sleep(conn) -> dict:
+    """Park Yugo: lie down then go limp — the safe 'sleep' state (StandDown → Damp).
+
+    A short settle lets StandDown finish so Damp relaxes from lying, not standing.
+    """
+    fire(conn, "StandDown")
+    time.sleep(settings.motion.trick_balance_settle_s)
+    return fire(conn, "Damp")

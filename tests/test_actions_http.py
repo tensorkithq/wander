@@ -59,6 +59,11 @@ def test_unknown_trick_404(client):
     assert client.post("/trick/Nope").status_code in (404, 503)
 
 
+def test_sleep_route_503_when_offline(client):
+    """The /sleep park sequence (StandDown -> Damp) needs the dog -> 503 offline."""
+    assert client.post("/sleep").status_code == 503
+
+
 def test_action_not_overridable_via_query_param(client):
     """A query param must not be able to swap which move a named route fires.
 
