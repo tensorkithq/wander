@@ -41,7 +41,10 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
 ```
 
 ## Shared constraints (apply to all workstreams)
-- **Air has no LiDAR** → camera-first perception (YOLO), no mapping/nav stack.
+- **Air has no LiDAR** → camera-first perception via **external APIs** (OpenAI GPT-4o-vision +
+  **Replicate** hosted models), **sampled ~1–3 fps** — no local models, no torch on the laptop, no
+  mapping/nav stack, no own GPU for Phase 1. (Sidesteps DimOS's bundled perception modules and their
+  git-LFS model tarballs entirely.)
 - **Air has no onboard mic or speaker** → all voice I/O lives on the phone/laptop. Yugo "speaks
   through Yugo" (the app/laptop speaker).
 - **WebRTC `LocalSTA` requires the laptop on the dog's LAN** → only the laptop holds the robot link.
@@ -53,8 +56,9 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
 - **Brain = DimOS agentic mode with `OPENAI_API_KEY`** on the bridge/laptop (`dimos run
   unitree-go2-agentic`; NL→behavior; camera-first on the Air). Per `koolamusic/dimos` Go2 docs:
   https://github.com/koolamusic/dimos/blob/main/docs/platforms/quadruped/go2/index.md
-- Cloud APIs → low local load; keys: `OPENAI_API_KEY` (bridge), **Deepgram + ElevenLabs** (app).
-  Mood-driven music may be generated on the server brain (ElevenLabs) and streamed down.
+- Cloud APIs → low local load; keys: `OPENAI_API_KEY` + **Replicate** (bridge/brain — agent +
+  perception), **Deepgram + ElevenLabs** (app). GPU server (ws3) **deferred** — only for continuous
+  real-time tracking later.
 
 ## Naming
 - Robot dog = **Yugo**. App = **Yugo**. Repo = `tensorkithq/wander`.

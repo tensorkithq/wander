@@ -1,6 +1,11 @@
 # PRD — Workstream 3: GPU Skills FastAPI (optional / additive)
 
-**Date:** 2026-05-28 · **Status:** draft (deferred until needed) · **Serves:** the laptop bridge (ws1)
+**Date:** 2026-05-28 · **Status:** DEFERRED (2026-05-28) · **Serves:** the laptop bridge (ws1)
+
+> **Decision (2026-05-28):** Phase-1 perception runs on **external APIs — OpenAI GPT-4o-vision +
+> Replicate** (sampled ~1–3 fps), called from the laptop/brain. **No own GPU server is built.** This
+> doc is the **upgrade path**: stand it up only if you later need continuous, high-fps perception
+> that per-call pricing can't afford.
 
 ## Objective
 A **second FastAPI**, running on the CUDA server (RunPod A5000), that exposes **heavier "skills"**

@@ -47,16 +47,23 @@ Everything in the ws1 bridge API, **plus** the DimOS-library brain in the same p
 - WebRTC `LocalSTA` to Yugo; reflex/safety; the full HTTP/WS contract the app codes against.
 - **DimOS agentic mode (`OPENAI_API_KEY`)** in-process via the library pattern (not `dimos run` CLI)
   → `POST /agent/say` calls the agent directly.
-- **Camera detection (YOLO) on MPS**, kept light (no heavy VLM — that's the only thing the missing
-  A5000 would have accelerated).
+- **Perception = external APIs** (OpenAI GPT-4o-vision + **Replicate**), **sampled ~1–3 fps** from
+  the WebRTC camera. **No torch / no local YOLO / no MPS models on the laptop.** We compose our own
+  light DimOS graph (connection + control) and **skip DimOS's bundled perception modules**, so the
+  missing git-LFS model tarballs are a non-issue.
 - Triggers ElevenLabs music/SFX (or relays the app's), drives gait/LED/dance/breathe.
 
 ## What you give up vs the 3-tier (and why it's fine for Phase 1)
-- **No A5000 headroom** → keep perception light: camera **detection**, not real-time heavy VLM
-  scene-mood. Good enough for Creature/Hunt/Scanner on the Air.
-- **16 GB RAM / ~38 GB disk pressure** → install only what the brain needs on the laptop; watch disk
-  (the `unitree-go2-detection` path already pulls torch locally — budget for it).
+- **Perception is sampled (~1–3 fps) via external APIs, not continuous local inference.** Fine for a
+  creature that "notices" you after a beat; *not* for smooth, high-fps person-following. Trade: per-
+  call cost + network dependency (you already depend on OpenAI/ElevenLabs/Deepgram, so not a new
+  category of risk).
 - **No "run while away from the dog"** → laptop must be on the dog's LAN (it always had to be anyway).
+
+## Disk/RAM win (vs the earlier local-YOLO idea)
+Because perception is external, **the laptop needs no torch / no vision models** — the install stays
+genuinely light (robot connection + FastAPI + HTTP clients for OpenAI/Replicate/agent). This clears
+the 16 GB / ~38 GB pressure that local YOLO would have caused.
 
 ## Hard constraints (unchanged)
 - Air: **no LiDAR** (camera-first), **no onboard mic/speaker** (audio on app/laptop).
