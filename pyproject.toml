@@ -19,3 +19,14 @@ dependencies = [
 # side, which manages its own toolchain) is never picked up by Python tooling.
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
