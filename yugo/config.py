@@ -39,6 +39,10 @@ class MotionConfig(BaseModel):
     publish_hz: float = 20.0  # how often the held velocity is (re)sent to the dog
     linear_step: float = 0.4  # forward/back speed for /up,/down nudges (m/s)
     angular_step: float = 0.8  # turn rate for /left,/right nudges (rad/s)
+    # While a trick (SPORT_MOD action) runs, the velocity loop is muted this long
+    # so its zero-velocity stream can't clobber the trick. ~ longest common trick;
+    # raise for long dances. Cleared early by any explicit nav / cmd_vel / stop.
+    trick_suspend_s: float = 6.0
 
 
 class Settings(BaseModel):

@@ -84,6 +84,7 @@ class MotionController:
         self._lock = threading.Lock()
         self._cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._cmd_ts: Optional[float] = None
+        self._suspend_until: float = 0.0  # velocity loop muted until this monotonic time
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -102,6 +103,7 @@ class MotionController:
         with self._lock:
             self._cmd = (vx, vy, wz)
             self._cmd_ts = time.monotonic()
+            self._suspend_until = 0.0  # explicit motion overrides a trick mute
         return (vx, vy, wz)
 
     def drive(self, direction: str) -> tuple[float, float, float]:
@@ -111,11 +113,26 @@ class MotionController:
         return self.set_velocity(vx, vy, wz)
 
     def stop(self) -> None:
-        """Immediate safe stop: zero the held command and push a zero to the dog."""
+        """Immediate safe stop: zero the held command and push a zero to the dog.
+
+        Overrides any trick mute — a stop must always reach the dog.
+        """
         with self._lock:
             self._cmd = (0.0, 0.0, 0.0)
             self._cmd_ts = time.monotonic()
+            self._suspend_until = 0.0
         self._publish((0.0, 0.0, 0.0))
+
+    def suspend(self, seconds: Optional[float] = None) -> None:
+        """Mute the velocity publish loop for `seconds` (default cfg.trick_suspend_s).
+
+        Called while a trick (SPORT_MOD action) runs so the loop's zero-velocity
+        `move(0,0,0)` stream can't clobber it. Any explicit nav / cmd_vel / stop
+        clears the mute — motion and safety always win.
+        """
+        dur = self._cfg.trick_suspend_s if seconds is None else seconds
+        with self._lock:
+            self._suspend_until = time.monotonic() + max(0.0, dur)
 
     def _effective(self) -> tuple[tuple[float, float, float], Optional[float]]:
         with self._lock:
@@ -175,8 +192,24 @@ class MotionController:
             self._thread = None
 
     def _loop(self) -> None:
+        # Publish ONLY while a command is fresh; on the deadman edge send exactly
+        # one zero, then go quiet — no perpetual move(0,0,0) spam (that clobbers
+        # tricks). While suspended (a trick is running) stay off the channel.
         period = 1.0 / self._cfg.publish_hz
+        was_active = False
         while not self._stop_event.is_set():
-            eff, _ = self._effective()
-            self._publish(eff)
+            now = time.monotonic()
+            with self._lock:
+                suspended = now < self._suspend_until
+            if suspended:
+                was_active = False  # don't emit a stale closing zero after the trick
+            else:
+                eff, age = self._effective()
+                fresh = age is not None and age <= self._cfg.command_timeout
+                if fresh:
+                    self._publish(eff)
+                    was_active = True
+                elif was_active:
+                    self._publish((0.0, 0.0, 0.0))  # one closing stop, then quiet
+                    was_active = False
             self._stop_event.wait(period)

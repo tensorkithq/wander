@@ -45,7 +45,8 @@ def _make_action_route(name: str, move: str) -> None:
     # it must NOT be a path-op parameter, or FastAPI would expose it as a query
     # param and let a client override which move fires.
     @router.post(f"/{name}", response_model=TrickResult, name=f"action_{name}")
-    def _action(conn=Depends(get_robot)):
+    def _action(conn=Depends(get_robot), motion=Depends(get_motion)):
+        motion.suspend()  # mute the velocity loop so it can't clobber the trick
         return RobotController.fire(conn, move)
 
     _action.__doc__ = f"Fire the {move!r} action."
@@ -56,8 +57,9 @@ for _name, _move in RobotController.ACTIONS.items():
 
 
 @router.post("/trick/{name}", response_model=TrickResult)
-def trick(name: str, conn=Depends(get_robot)):
+def trick(name: str, conn=Depends(get_robot), motion=Depends(get_motion)):
     """Generic escape hatch: fire any SPORT_CMD move by name (see GET /tricks)."""
+    motion.suspend()  # mute the velocity loop so it can't clobber the trick
     return RobotController.fire(conn, name)
 
 
