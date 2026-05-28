@@ -14,8 +14,10 @@
 # its description whether it runs over WebRTC on the robot or calls the cloud.
 #
 # Source files this spec documents:
-#   validate_api.py  -> /healthz, /tricks, /trick/{name}, /hello, /stop  (port 8080)
-#   web_bridge.py    -> /healthz, /debug, /cmd_vel, /stop, /video_feed/color_image (port 5555)
+#   yugo/ (main.py + routers/SystemRouter,ControlRouter)
+#                  -> /healthz, /tricks, /trick/{name}, /hello, /stop  (port 8080)
+#   yugo/bridge/web_bridge.py
+#                  -> /healthz, /debug, /cmd_vel, /stop, /video_feed/color_image (port 5555)
 # Everything else is PLANNED (target surface per prd/architecture-body.md).
 # =============================================================================
 
@@ -67,9 +69,9 @@ info:
 
 servers:
   - url: http://localhost:8080
-    description: validate_api.py — connection validator (default port 8080).
+    description: yugo.main:app — structured body API (default port 8080).
   - url: http://localhost:5555
-    description: web_bridge.py — WebBridge camera + teleop bridge (default port 5555).
+    description: yugo/bridge/web_bridge.py — WebBridge camera + teleop bridge (default port 5555).
 
 # No auth: empty security requirement object => the API may be called with no
 # credentials. Declared at the document level so it applies to every operation.
