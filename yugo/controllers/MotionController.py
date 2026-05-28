@@ -192,24 +192,19 @@ class MotionController:
             self._thread = None
 
     def _loop(self) -> None:
-        # Publish ONLY while a command is fresh; on the deadman edge send exactly
-        # one zero, then go quiet — no perpetual move(0,0,0) spam (that clobbers
-        # tricks). While suspended (a trick is running) stay off the channel.
+        # Re-send the effective velocity EVERY tick — this must be continuous.
+        # The connection's own auto-stop (`stop_movement`) merely cancels a timer;
+        # it does NOT command the dog to stop. So a reliable stop depends on us
+        # STREAMING zero-velocity after the deadman edge (a single packet can be
+        # lost / the firmware holds the last joystick). While suspended (a trick is
+        # running) we stay off the channel so the zero stream can't clobber the
+        # SPORT_MOD action.
         period = 1.0 / self._cfg.publish_hz
-        was_active = False
         while not self._stop_event.is_set():
             now = time.monotonic()
             with self._lock:
                 suspended = now < self._suspend_until
-            if suspended:
-                was_active = False  # don't emit a stale closing zero after the trick
-            else:
-                eff, age = self._effective()
-                fresh = age is not None and age <= self._cfg.command_timeout
-                if fresh:
-                    self._publish(eff)
-                    was_active = True
-                elif was_active:
-                    self._publish((0.0, 0.0, 0.0))  # one closing stop, then quiet
-                    was_active = False
+            if not suspended:
+                eff, _ = self._effective()
+                self._publish(eff)  # eff is zero once the deadman window lapses
             self._stop_event.wait(period)
