@@ -63,7 +63,7 @@ tight control loop across the internet. Camera frames stream laptop→cloud for 
 M2 Pro can also run perception locally via MPS if the hop is costly (A/B test).
 
 **Cross-machine transport (revised 2026-05-28 — DDS dropped):** the laptop↔brain link is a plain
-**HTTP/WebSocket bridge** (the FastAPI `WebBridge` in `laptop/bridge/`), NOT DimOS DDS. Each box runs
+**HTTP/WebSocket bridge** (the FastAPI `WebBridge` in `fastapi/`), NOT DimOS DDS. Each box runs
 its own DimOS graph; the laptop POSTs frames + sensor scalars to the brain and gets mood/behavior
 back over WebSocket. HTTP/WS rides fine over **userspace-mode Tailscale** (plain TCP), so the
 CycloneDDS-vs-`tailscale0` problem is avoided entirely. DDS-over-Tailscale was abandoned: it needs a

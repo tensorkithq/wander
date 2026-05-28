@@ -129,10 +129,10 @@ STAGE 6 — run the role (HTTP/WS bridge, not a DDS module-split)
   # This node: robot-IO + reflex + Rerun viewer + the FastAPI bridge + audio.
   # Brain node: its own DimOS graph (perception + mood agent), reached over HTTP/WS.
   #
-  # The bridge already exists: laptop/bridge/  (WebBridge: MJPEG camera out +
+  # The bridge already exists: fastapi/  (WebBridge: MJPEG camera out +
   # /cmd_vel teleop in, with deadman + clamps). Run it against the Air:
   #   cd /Users/0x/srv/dimos   # (the live DimOS install)
-  #   python <repo>/laptop/bridge/run.py --robot-ip $ROBOT_IP --port 5555
+  #   python <repo>/fastapi/run.py --robot-ip $ROBOT_IP --port 5555
   #   open http://localhost:5555/debug
   #
   # To add the brain (optional, when wanted): the laptop POSTs frames + sensor

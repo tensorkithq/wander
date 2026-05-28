@@ -1,6 +1,6 @@
 # PRD — Workstream 1: Laptop FastAPI Bridge
 
-**Date:** 2026-05-28 · **Status:** draft · **Builds on:** `../laptop/bridge/web_bridge.py` (exists)
+**Date:** 2026-05-28 · **Status:** draft · **Builds on:** `../fastapi/web_bridge.py` (exists)
 
 ## Objective
 Be the **always-on local hub** between Yugo (Go2 Air) and everything else. It owns the single
