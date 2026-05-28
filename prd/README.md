@@ -15,11 +15,22 @@ The chosen, current architecture is the **body/mind split** — supersedes the v
   control, reflex, state, the app contract, and the agent loop. The app hooks this locally.
 - **`architecture-mind.md`** — all **intelligence in the cloud** (OpenAI reasoning, pluggable
   perception, Deepgram/ElevenLabs voice, LanceDB memory), which the body delegates to.
-- **`../fastapi/openapi.yaml`** — the full route-by-route surface spec for the body.
+- **`../yugo/openapi.yaml`** — the full route-by-route surface spec for the body.
 
 > **Body = I/O + control + fast loop (local). Mind = intelligence (cloud).** The workstream docs
 > below remain valid as detail (app = ws2; body refines ws1; mind refines ws3), but the canonical
 > deployment is body/mind, not the earlier 3-tier-vs-laptop-only framing.
+
+> **Naming (2026-05-29):** "the body" / "the hub" = the laptop FastAPI app `yugo.main`. The term
+> *bridge* in these docs refers to that laptop hub historically — but the module literally named
+> `yugo/bridge/` (`WebBridge`, :5555) is now **deprecated** (MJPEG-only, superseded by the hub).
+> Read "bridge" as "body/hub"; don't conflate it with the dead module.
+
+**Build status (2026-05-29):** the body foundation is implemented in `yugo/` — health/discovery,
+expressive actions, keyboard nav + deadman teleop (`MotionController`), `/state`, and owners/moods
+persistence, with a real HTTP test suite (`../tests/`). **Designed, not built:** `/feed` video
+(WebRTC relay, see `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`) and `/ws/state`.
+**Planned:** the mind hook `/agent/say`, wand `/sensor`, `/led`, `/mode`, `/breathe`.
 
 ## Workstreams (this PRD set)
 | # | Workstream | Doc | Role |
@@ -40,7 +51,7 @@ it. Phase 1 runs with workstreams 1 + 2 only; workstream 3 is additive.
   Go2 Air "Yugo" ──WebRTC LocalSTA (LAN)──┐
                                           ▼
    ┌─────────────────────────────────┐  HTTP/WS   ┌──────────────────────────┐
-   │ LAPTOP FastAPI bridge (workstream 1)│◀───────▶│ GPU skills FastAPI (ws 3) │
+   │ LAPTOP FastAPI body/hub (ws 1)   │◀───────▶│ GPU skills FastAPI (ws 3) │
    │ camera · teleop · tricks · LED ·  │ Tailscale │ heavy VLM · mood · music  │
    │ state WS · voice I/O · wand ingest│           │ (optional, streamed down) │
    └─────────────────────────────────┘            └──────────────────────────┘

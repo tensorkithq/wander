@@ -88,3 +88,15 @@ persistence.
 (`/feed`) — see `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`. The agent loop (DimOS
 agentic, `OPENAI_API_KEY`) and perception (OpenAI vision / Replicate) are mind-side and not in this
 package yet.
+
+## Roadmap / TODO (body-side, toward the Phase-1 demo)
+Demo arc: **meet → talk calm → wand summons music → dance → meditate.** Milestones are demoable on
+their own. The RN app (ws2) and the cloud mind are parallel tracks; perception/vision is **out of
+scope** for the Phase-1 demo (no demo beat needs it).
+
+- [x] **M0 — Foundation:** safe control, reflex/deadman, expressive actions, `/state`, persistence, tests.
+- [ ] **M1 — See + drive:** `/feed` WebRTC video relay (designed) → `/ws/state` aura/telemetry.
+- [ ] **M2 — Talk (keystone):** `/agent/say` (text → mind → behavior + reply), `/mode`.
+- [ ] **M3 — Play:** `/sensor` (phone-wand ingest), `/dance` beat-sync (`{bpm, style}`).
+- [ ] **M4 — Calm:** `/breathe`, `/led` (mood color), meditation `/mode`.
+- [ ] **Cleanup:** delete `bridge/` once `/feed` ships; add `/routine` (move sequences).

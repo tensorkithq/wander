@@ -1,6 +1,8 @@
 # PRD — Workstream 1: Laptop FastAPI Bridge
 
-**Date:** 2026-05-28 · **Status:** draft · **Builds on:** `../fastapi/web_bridge.py` (exists)
+**Date:** 2026-05-28 · **Status:** draft · **Builds on:** `../yugo/` — the body/hub (`yugo.main`).
+(The legacy `yugo/bridge/web_bridge.py` "bridge" this doc is named for is now **deprecated**; "bridge"
+here = the body/hub. See `architecture-body.md` and `README.md`.)
 
 ## Objective
 Be the **always-on local hub** between Yugo (Go2 Air) and everything else. It owns the single
@@ -26,21 +28,25 @@ On the laptop, on the dog's LAN, reachable by the app over LAN or Tailscale. Sin
 
 ## Requirements (objectives → endpoints)
 
-### Already implemented (`WebBridge`)
-- `GET /video_feed/color_image` — MJPEG camera stream.
-- `POST /cmd_vel {vx,vy,wz}` — teleop; **velocity-clamped** (0.6 m/s, 1.2 rad/s).
-- `POST /stop` — zero velocity.
-- `GET /healthz` — liveness + `have_frame` + last-command age.
-- **Deadman watchdog** — auto-stop if no command within 0.4 s. (Keep; safety-critical.)
+### Already implemented (the hub — `yugo.main`)
+- `POST /cmd_vel {vx,vy,wz}` — teleop; **velocity-clamped** (0.6 m/s, 1.2 rad/s), deadman-guarded.
+- `POST /up`/`/down`/`/left`/`/right` — keyboard-nav timed nudges (deadman-backed).
+- `POST /stop` — immediate zero (panic).
+- **Deadman watchdog** (`MotionController`) — auto-stop on stale command (**0.5 s** window),
+  observable at `GET /state`. (Safety-critical; keep.)
+- `POST /trick/{name}` + friendly actions (`/hello`, `/wiggle`, `/heart`, `/sit`, `/standup`,
+  `/standdown`, `/stretch`, `/dance`) — Go2 `SPORT_CMD` moves; catalog at `GET /actions`.
+- `GET /healthz` (liveness + live connection), `GET /tricks`, `GET /state` (motion/deadman).
+- _Deprecated (WebBridge, :5555):_ `GET /video_feed/color_image` MJPEG — the only camera path
+  until `/feed` lands.
 
 ### To add — control
-- `POST /trick {name}` and `POST /routine {names:[...]}` — fire Go2 `SPORT_CMD` moves
-  (`Hello`, `WiggleHips`, `Stretch`, `FingerHeart`, `RecoveryStand`, `BalanceStand`, dance moves …)
-  via `RTC_TOPIC["SPORT_MOD"]`. Pattern proven in `go2_trick.py`.
+- `POST /routine {names:[...]}` — fire a *sequence* of `SPORT_CMD` moves (single moves are already
+  done via `/trick/{name}` + the friendly actions).
 - `POST /led {color|effect}` — front-lamp color via the VUI topic (mood color, Ghost strobe).
 - `POST /mode {creature|ghost|hunt|scanner|music|meditation}` — set the active behavior mode.
-- `POST /dance {bpm, style}` — beat-synced pose/height choreography (or a trick sequence) for
-  "Yugo dances to the music."
+- **`/dance` beat-sync** — `/dance` fires `Dance1` today; add `{bpm, style}` for beat-synced
+  pose/height choreography ("Yugo dances to the music").
 - `POST /breathe {on|off, rate}` — slow body-height oscillation for meditation mode.
 
 ### To add — perception / state out

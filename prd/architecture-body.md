@@ -1,7 +1,7 @@
 # Architecture — The Body (local FastAPI hub)
 
 **Date:** 2026-05-29 · **Status:** canonical · **Pairs with:** `architecture-mind.md`
-**Surface spec:** `../fastapi/openapi.yaml`
+**Surface spec:** `../yugo/openapi.yaml`
 
 ## One line
 The **body** is a single light FastAPI on the LAN computer that *is* Yugo's nervous system: it holds
@@ -23,7 +23,9 @@ A $60 Pi can replace the laptop with no code change.
   clamps, global stop, "clear-space" gating for tricks.
 - **State aggregation:** `/ws/state` push (battery, pose/IMU, mode, mood, detections) — merging
   robot telemetry with results returned by the mind.
-- **Media:** camera MJPEG out (`/video_feed/...`); samples frames to send to the mind for perception.
+- **Media:** camera out to clients — currently MJPEG on the deprecated WebBridge; the canonical plan
+  is the `/feed` WebRTC relay on the hub (designed — see
+  `../docs/plans/2026-05-29-webrtc-feed-relay-design.md`). Also samples frames to the mind for perception.
 - **App contract:** the stable HTTP/WS API the Yugo app codes against (LAN, low latency).
 - **Agent orchestration loop:** runs *here*, but each step calls the mind — `/agent/say` forwards an
   utterance to the cloud agent and applies the returned behavior + reply.
@@ -45,11 +47,16 @@ RN app ──direct──▶ Deepgram STT / ElevenLabs TTS                      
 ```
 
 ## Build state (seed → target)
-- **Seed (exists):** `fastapi/validate_api.py` (no-auth connection validator — `curl /hello` → trick;
-  proven against the real Yugo), `fastapi/web_bridge.py` (`WebBridge`: MJPEG + `/cmd_vel` + deadman),
-  `fastapi/run.py`. Tests in `scripts/`, robot utilities in `utils/`.
-- **Target:** the full hub surface in `fastapi/openapi.yaml` — control + state + agent + sensor +
+- **Implemented (2026-05-29):** the body lives in `yugo/` — `main.py` (FastAPI + lifespan, with a
+  `YUGO_NO_ROBOT` offline mode), `routers/` + `controllers/` covering health/discovery, expressive
+  actions, keyboard nav + deadman teleop (`MotionController`), `/state`, and owners/moods persistence.
+  Real HTTP test suite in `../tests/` (`uv run pytest`); robot utilities in `../utils/`.
+- **Deprecated:** `yugo/bridge/` (`WebBridge`: MJPEG + `/cmd_vel` + deadman on :5555) — teleop/deadman
+  are superseded by the hub; only its camera MJPEG has no hub equivalent yet. (The earlier
+  `fastapi/validate_api.py` connection-validator seed is gone, folded into the hub.)
+- **Target:** the full hub surface in `../yugo/openapi.yaml` — control + state + agent + sensor +
   audio-trigger endpoints, with the mind delegated behind `/agent/say` and the perception adapter.
+  Near-term order: video as the `/feed` WebRTC relay → `/ws/state` → `/agent/say`.
 
 ## Hard-won constraints (from live testing 2026-05-28/29)
 - **Tricks need a precondition:** expressive moves (e.g., `WiggleHips` 1033) are ignored unless Yugo
