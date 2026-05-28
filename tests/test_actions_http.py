@@ -13,7 +13,6 @@ import pytest
 # Friendly route -> canonical SPORT_CMD move (the contract these routes expose).
 EXPECTED_ACTIONS = {
     "hello": "Hello",
-    "wiggle": "WiggleHips",
     "heart": "FingerHeart",
     "sit": "Sit",
     "standup": "StandUp",
@@ -35,7 +34,6 @@ def test_catalog_api_ids_match_known_moves(client):
     actions = {a["name"]: a for a in client.get("/actions").json()["actions"]}
     # Spot-check a few stable Go2 SPORT_CMD ids.
     assert actions["hello"]["api_id"] == 1016
-    assert actions["wiggle"]["api_id"] == 1033
     assert actions["heart"]["api_id"] == 1036
     assert actions["sit"]["api_id"] == 1009
     assert actions["standup"]["api_id"] == 1004

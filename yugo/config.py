@@ -40,9 +40,14 @@ class MotionConfig(BaseModel):
     linear_step: float = 0.4  # forward/back speed for /up,/down nudges (m/s)
     angular_step: float = 0.8  # turn rate for /left,/right nudges (rad/s)
     # While a trick (SPORT_MOD action) runs, the velocity loop is muted this long
-    # so its zero-velocity stream can't clobber the trick. ~ longest common trick;
-    # raise for long dances. Cleared early by any explicit nav / cmd_vel / stop.
-    trick_suspend_s: float = 6.0
+    # so its zero-velocity stream can't clobber it. Covers the BalanceStand
+    # preamble (trick_balance_settle_s) + the move; raise for long dances. Cleared
+    # early by any explicit nav / cmd_vel / stop.
+    trick_suspend_s: float = 8.0
+    # Expressive moves (WiggleHips/FingerHeart/Stretch/Dance1) are ignored unless
+    # Yugo is upright, so those tricks prepend BalanceStand and wait this long for
+    # it to settle before firing the move.
+    trick_balance_settle_s: float = 1.5
 
 
 class Settings(BaseModel):
