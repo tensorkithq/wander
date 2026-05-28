@@ -1,0 +1,21 @@
+[project]
+name = "yugo"
+version = "0.0.0"
+description = "Yugo — robot/DimOS control layer (laptop bridge + robot utilities) for the Go2 Air."
+requires-python = ">=3.12"
+dependencies = [
+    "dimos==0.0.12.post2",
+    "fastapi",
+    "uvicorn",
+    "unitree-webrtc-connect-leshy",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "pyyaml",
+]
+
+# Application, not a library: the root coordinates flat runnable code
+# (fastapi/, scripts/, utils/) — nothing here is meant to be pip-installed,
+# so uv does no build/package discovery. This also means app/ (the Node/React
+# side, which manages its own toolchain) is never picked up by Python tooling.
+[tool.uv]
+package = false
