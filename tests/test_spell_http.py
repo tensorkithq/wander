@@ -171,12 +171,23 @@ def test_spell_motion_missing_channels_422(spell_client):
 def test_sensor_machine_single_flight():
     m = SensorController.machine
     assert m.phase is SensorController.SensorPhase.IDLE
-    assert m.begin_cast() is True       # claim the slot
+    assert m.begin_cast(5.0) is True    # claim the gate for 5s
     assert m.busy is True
-    assert m.begin_cast() is False      # already casting -> caller must drop
+    assert m.begin_cast(5.0) is False   # still in flight -> caller must drop
     m.end_cast()
     assert m.busy is False
-    assert m.begin_cast() is True       # reusable after the cast ends
+    assert m.begin_cast(5.0) is True    # reusable once released
+    m.end_cast()
+
+
+def test_sensor_machine_deadline_auto_releases():
+    """The hold is a deadline: a tiny hold lapses on its own, no end_cast needed."""
+    m = SensorController.machine
+    assert m.begin_cast(0.05) is True
+    assert m.busy is True
+    time.sleep(0.1)
+    assert m.busy is False              # auto-released after the hold window
+    assert m.begin_cast(5.0) is True    # free again
     m.end_cast()
 
 
@@ -184,7 +195,7 @@ def test_fire_spell_dropped_while_casting():
     """A cast that arrives mid-cast is piped to null: dropped, never fired, but
     the match is still computed."""
     m = SensorController.machine
-    assert m.begin_cast() is True       # simulate an in-flight cast
+    assert m.begin_cast(5.0) is True       # simulate an in-flight cast
     try:
         class _T:
             magnetometer = _sweep()
@@ -201,7 +212,7 @@ def test_fire_spell_dropped_while_casting():
 def test_spell_http_dropped_while_casting(spell_client):
     """Over HTTP: /sensor/spell returns dropped:true while a cast is in flight."""
     m = SensorController.machine
-    assert m.begin_cast() is True
+    assert m.begin_cast(5.0) is True
     try:
         r = spell_client.post(
             "/sensor/spell", json={"source": "phone-wand", "magnetometer": _circle()}
@@ -216,7 +227,7 @@ def test_spell_http_dropped_while_casting(spell_client):
 def test_sensor_ambient_dropped_while_casting(spell_client):
     """Ambient /sensor is piped to null while a spell is mid-cast, then resumes."""
     m = SensorController.machine
-    assert m.begin_cast() is True
+    assert m.begin_cast(5.0) is True
     try:
         r = spell_client.post(
             "/sensor", json={"source": "watch-wand", "magnetometer": {"x": 1, "y": 2, "z": 3}}

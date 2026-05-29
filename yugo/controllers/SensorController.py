@@ -27,10 +27,12 @@ from __future__ import annotations
 import enum
 import hashlib
 import threading
+import time
 from typing import List, Optional, Sequence
 
 from unitree_webrtc_connect.constants import SPORT_CMD
 
+from yugo.config import settings
 from yugo.controllers import RobotController
 
 # --- Versioned, FIXED constants. Changing ANY of these changes every spell. ---
@@ -220,40 +222,51 @@ class SensorPhase(str, enum.Enum):
 class _SensorMachine:
     """Single-flight gate for the wand sensor namespace.
 
-    A spell cast holds the machine in CASTING for the WHOLE duration of its
-    execution (the BalanceStand settle + SPORT_MOD publish, ~1.5s+). While
-    CASTING, every other sensor request — a second spell OR an ambient /sensor
-    reading — is DROPPED ("piped to null") instead of queued, so a flood of wand
-    posts can't stack casts up behind the settle and make the dog twitch through
-    a backlog. Thread-safe by design: FastAPI runs these sync endpoints in a
-    threadpool, so concurrent posts land on different threads and race here.
+    A cast claims the gate for a HOLD window covering the trick's FULL execution
+    (the BalanceStand settle + the move itself, ~`trick_suspend_s`), NOT just
+    until the SPORT_MOD publish returns. While held — phase CASTING — every other
+    sensor request (a second spell OR an ambient /sensor reading) is DROPPED
+    ("piped to null"), so the next cast is only accepted once the current one has
+    actually finished on the dog — no stacking, no mid-move interruption (e.g. a
+    Pose cut short by the next cast).
+
+    The hold is a monotonic DEADLINE, so it auto-releases when the move is done;
+    an offline or failed cast (nothing will execute) releases it early via
+    `end_cast`. Thread-safe: FastAPI runs these sync endpoints in a threadpool,
+    so concurrent posts land on different threads and race here.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._phase = SensorPhase.IDLE
+        self._busy_until = 0.0  # monotonic deadline; now < this => CASTING
 
     @property
     def phase(self) -> SensorPhase:
         with self._lock:
-            return self._phase
+            return SensorPhase.CASTING if time.monotonic() < self._busy_until else SensorPhase.IDLE
 
     @property
     def busy(self) -> bool:
-        return self.phase is SensorPhase.CASTING
-
-    def begin_cast(self) -> bool:
-        """Atomically claim the cast slot. True = won it (caller MUST end_cast in
-        a finally); False = a cast is already in flight, so drop this request."""
         with self._lock:
-            if self._phase is SensorPhase.CASTING:
+            return time.monotonic() < self._busy_until
+
+    def begin_cast(self, hold_s: float) -> bool:
+        """Atomically claim the gate for `hold_s` seconds. True = won it; False =
+        a cast is still in flight, so drop this request. On success the deadline
+        releases the gate on its own once the trick has executed — the caller only
+        needs `end_cast` to free it EARLY (offline / failed cast)."""
+        with self._lock:
+            now = time.monotonic()
+            if now < self._busy_until:
                 return False
-            self._phase = SensorPhase.CASTING
+            self._busy_until = now + hold_s
             return True
 
     def end_cast(self) -> None:
+        """Release the gate now — for a cast that won't actually execute (offline
+        or errored), so it doesn't needlessly lock out the next one."""
         with self._lock:
-            self._phase = SensorPhase.IDLE
+            self._busy_until = 0.0
 
 
 # Process-wide singleton: the wand is one physical robot, so one cast at a time.
@@ -266,7 +279,9 @@ def fire_spell(conn, trace) -> dict:
 
     Single-flight: the match is cheap and always computed, but the FIRING is
     gated by `machine` — if a cast is already executing this one is dropped
-    (`dropped:true`, nothing published) rather than queued behind the settle.
+    (`dropped:true`, nothing published) rather than queued. The gate is held for
+    the trick's FULL execution (`trick_suspend_s`), so the next cast is only
+    accepted once this one has actually finished — not just once it's published.
 
     Dispatch by client channel: a magnetometer trace is the phone (original
     engine, accel ignored as before); otherwise it's the watch's device-motion
@@ -285,13 +300,18 @@ def fire_spell(conn, trace) -> dict:
     else:
         matched = spell_for_motion(trace.accel, getattr(trace, "gyro", None))
 
-    if not machine.begin_cast():
+    # Hold the gate for the trick's full execution window (settle + move), so the
+    # next cast is only accepted once this one has actually finished on the dog.
+    if not machine.begin_cast(settings.motion.trick_suspend_s):
         return {"matched": matched, "fired": False, "dropped": True}
     try:
         fired = False
         if conn is not None and conn.connection_ready.is_set():
             RobotController.fire(conn, matched["move"], ensure_balance=True)
             fired = True
+        if not fired:
+            machine.end_cast()  # offline: nothing will execute — free the gate now
         return {"matched": matched, "fired": fired, "dropped": False}
-    finally:
-        machine.end_cast()
+    except Exception:
+        machine.end_cast()  # failed cast won't execute — don't lock out the next
+        raise
