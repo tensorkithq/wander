@@ -4,6 +4,7 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "tunnel": "expo start --tunnel --go",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "DARK_MODE=class expo start --web",
