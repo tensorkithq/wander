@@ -28,6 +28,19 @@ OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 REALTIME_MODEL = os.environ.get("YUGO_REALTIME_MODEL", "gpt-4o-realtime-preview")
 
 
+def _instructions(app) -> str:
+    """Yugo's persona, layered with mode-specific framing (Friend asks for steps)."""
+    base = AgentController.SYSTEM_PROMPT
+    mode_ctrl = getattr(app.state, "mode_ctrl", None)
+    if getattr(mode_ctrl, "mode", None) == "friend":
+        target = getattr(mode_ctrl, "target", None) or "your friend"
+        base += (
+            f" You are in FRIEND mode: you are looking for {target}. Ask the human for "
+            "directions one step at a time, and use the nav_steps tool to take each step."
+        )
+    return base
+
+
 def _realtime_tools() -> list[dict]:
     """Flatten the chat-style tool schemas into Realtime's flat function shape."""
     out = []
@@ -60,7 +73,7 @@ async def bridge(client_ws: WebSocket, app) -> None:
             await oai.send(json.dumps({
                 "type": "session.update",
                 "session": {
-                    "instructions": AgentController.SYSTEM_PROMPT,
+                    "instructions": _instructions(app),
                     "tools": _realtime_tools(),
                     "tool_choice": "auto",
                     "modalities": ["text", "audio"],

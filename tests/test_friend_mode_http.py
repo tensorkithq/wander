@@ -108,3 +108,22 @@ def test_two_steps_forward_parses_to_clamped_cmd_vel_then_waits(client):
     The underlying `/cmd_vel` it relies on is ALREADY implemented and
     clamped/deadman-guarded (M0); Friend introduces no new unclamped motion path.
     """
+
+
+def test_nav_step_velocity_mapping_within_clamp():
+    """The BODY half of Friend step-nav (now implemented): a step direction maps
+    to one nudge at the configured magnitude, on the right axis/sign, inside the
+    clamp envelope. The voice->step parse stays the Realtime placeholder above."""
+    from yugo.config import settings
+    from yugo.controllers.AgentController import _step_velocity
+
+    L, A = settings.motion.linear_step, settings.motion.angular_step
+    assert _step_velocity("forward") == (L, 0.0, 0.0)
+    assert _step_velocity("back") == (-L, 0.0, 0.0)
+    assert _step_velocity("left") == (0.0, L, 0.0)
+    assert _step_velocity("right") == (0.0, -L, 0.0)
+    assert _step_velocity("turn_left") == (0.0, 0.0, A)
+    assert _step_velocity("turn_right") == (0.0, 0.0, -A)
+    assert _step_velocity("sideways") is None
+    # step magnitudes sit inside the clamp envelope
+    assert L <= settings.motion.max_linear and A <= settings.motion.max_angular

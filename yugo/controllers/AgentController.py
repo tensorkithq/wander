@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Optional
 
 from yugo.controllers import RobotController
@@ -42,6 +43,32 @@ def _f(v: Any, default: float = 0.0) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+# Friend-mode step directions -> which velocity axis + sign. Magnitudes come from
+# the configured step sizes (and are clamped again by MotionController).
+_STEP_DIRS = {
+    "forward": ("vx", 1.0), "back": ("vx", -1.0),
+    "left": ("vy", 1.0), "right": ("vy", -1.0),
+    "turn_left": ("wz", 1.0), "turn_right": ("wz", -1.0),
+}
+
+
+def _step_velocity(direction: str) -> Optional[tuple[float, float, float]]:
+    """Map a Friend step direction to one (vx, vy, wz) nudge at the configured
+    step magnitude. None for an unknown direction."""
+    spec = _STEP_DIRS.get(direction)
+    if spec is None:
+        return None
+    from yugo.config import settings
+
+    axis, sign = spec
+    mag = settings.motion.angular_step if axis == "wz" else settings.motion.linear_step
+    return (
+        sign * mag if axis == "vx" else 0.0,
+        sign * mag if axis == "vy" else 0.0,
+        sign * mag if axis == "wz" else 0.0,
+    )
 
 
 def _tool_schemas() -> list[dict]:
@@ -74,6 +101,16 @@ def _tool_schemas() -> list[dict]:
             "name": "stop",
             "description": "Stop Yugo's movement immediately.",
             "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
+            "name": "nav_steps",
+            "description": ("Friend mode: take N discrete steps in a direction from a spoken "
+                            "instruction ('two steps forward'). Each step is one bounded, clamped, "
+                            "deadman-guarded nudge; the dog stops between steps."),
+            "parameters": {"type": "object", "properties": {
+                "direction": {"type": "string",
+                              "enum": ["forward", "back", "left", "right", "turn_left", "turn_right"]},
+                "count": {"type": "integer", "minimum": 1, "maximum": 10}},
+                "required": ["direction", "count"]}}},
     ]
 
 
@@ -137,6 +174,24 @@ def _exec_tool(app, name: str, args: dict) -> tuple[Behavior, str]:
         if motion is not None:
             motion.stop()
         return Behavior(type="none", name="stop"), "stopped"
+
+    if name == "nav_steps":
+        if motion is None:
+            return Behavior(), "motion unavailable"
+        direction = str(args.get("direction", ""))
+        count = max(1, min(int(_f(args.get("count", 1), 1)), 10))  # clamp 1..10 for safety
+        vel = _step_velocity(direction)
+        if vel is None:
+            return Behavior(), f"unknown direction {direction!r}"
+        from yugo.config import settings
+
+        step_s = settings.motion.command_timeout + 0.15  # one bounded nudge/step; deadman stops between
+        for _ in range(count):
+            motion.set_velocity(*vel)  # clamped + deadman-guarded (walk-mode gate handles RecoveryStand)
+            time.sleep(step_s)
+        return (Behavior(type="move", name="nav_steps",
+                         params={"direction": direction, "count": count}),
+                f"stepped {direction} x{count} (each a clamped deadman nudge)")
 
     return Behavior(), "no-op"
 
