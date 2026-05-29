@@ -18,6 +18,7 @@ dependencies = [
     "av",
     "numpy",
     "pillow",
+    "openai>=2.38.0",
 ]
 
 # Application, not a library: the root coordinates flat runnable code
