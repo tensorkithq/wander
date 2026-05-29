@@ -10,7 +10,7 @@ motion:
   max_angular: 1.2         # rad/s clamp on wz
 
 mood:
-  update_seconds: 30       # demo: pick a random mood this often (random until vision lands)
+  update_seconds: 3000       # demo: pick a random mood this often (random until vision lands)
   poll_seconds: 15         # cadence the mobile app should poll GET /api/moods/current
 
 mind:
