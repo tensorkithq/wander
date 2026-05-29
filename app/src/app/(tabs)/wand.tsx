@@ -27,7 +27,10 @@ const COMPASS_SIZE = Math.min(SW - 60, 320);
 const SPELL_SAMPLE_HZ = 50;
 const SPELL_INTERVAL_MS = Math.round(1000 / SPELL_SAMPLE_HZ);
 const SPELL_MAX_SAMPLES = 400; // ~8 s cap
-const SPELL_STREAM_THROTTLE_MS = 100; // 10 Hz ambient stream cap
+// Ambient /sensor stream cap. The body only keeps the latest reading (overwrites
+// last_sensor each POST), so a fast stream is pure waste — 2 Hz drives the aura
+// fine. The on-screen field intensity is computed locally, not from this stream.
+const AMBIENT_STREAM_THROTTLE_MS = 500; // 2 Hz
 
 // Direction sub-mode (gyro).
 type Direction = 'left' | 'right' | 'up' | 'down' | null;
@@ -216,7 +219,7 @@ export default function WandScreen() {
 
           // Ambient stream (throttled) — drives Yugo's aura.
           const now = Date.now();
-          if (now - lastStreamRef.current > SPELL_STREAM_THROTTLE_MS) {
+          if (now - lastStreamRef.current > AMBIENT_STREAM_THROTTLE_MS) {
             lastStreamRef.current = now;
             sensorStream({
               magnetometer: { x, y, z },
