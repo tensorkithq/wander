@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from yugo.config import Base, SessionLocal, engine, settings
+from yugo.controllers.ModeController import ModeController
 from yugo.controllers.MoodController import MoodLoop
 from yugo.controllers.MotionController import MotionController
 from yugo.routers import (
@@ -68,6 +69,10 @@ async def lifespan(app: FastAPI):
     motion = MotionController(app.state.robot, settings.motion)
     motion.start()
     app.state.motion = motion
+
+    # Mode state machine (the backbone behavior modules register enter/exit hooks
+    # into). Stateless w.r.t. the dog — a mode switch never publishes velocity.
+    app.state.mode_ctrl = ModeController()
 
     # Ensure DB tables exist (idempotent safety net; alembic owns schema evolution).
     Base.metadata.create_all(bind=engine)

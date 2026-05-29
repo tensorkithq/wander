@@ -20,9 +20,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from yugo.controllers import RobotController
 from yugo.controllers.MotionController import DIRECTIONS
-from yugo.dependencies import get_motion, get_robot
+from yugo.dependencies import get_mode, get_motion, get_robot
 from yugo.schemas.RobotSchema import (
     ActionsResponse,
+    ModeRequest,
+    ModeResult,
     MotionState,
     MoveResult,
     TrickResult,
@@ -121,6 +123,23 @@ def stop(motion=Depends(get_motion)):
 
 
 @router.get("/state", response_model=MotionState)
-def state(motion=Depends(get_motion)):
-    """Live motion + deadman state. After the deadman window, vx/vy/wz read 0."""
-    return MotionState(**motion.state())
+def state(motion=Depends(get_motion), mode_ctrl=Depends(get_mode)):
+    """Live motion + deadman state (+ active mode). After the deadman window,
+    vx/vy/wz read 0."""
+    return MotionState(**motion.state(), mode=mode_ctrl.mode)
+
+
+# --- Bot mode (the backbone every behavior module plugs into) ----------------
+
+@router.post("/mode", response_model=ModeResult)
+def set_mode(req: ModeRequest, mode_ctrl=Depends(get_mode)):
+    """Switch the body's active mode. A mode switch never moves the dog — it only
+    conditions which loops/personality/LED are active; locomotion always flows
+    through the clamped/deadman path. Unknown modes are rejected (422)."""
+    return ModeResult(mode=mode_ctrl.set_mode(req.mode))
+
+
+@router.get("/mode", response_model=ModeResult)
+def current_mode(mode_ctrl=Depends(get_mode)):
+    """The body's current active mode."""
+    return ModeResult(mode=mode_ctrl.mode)

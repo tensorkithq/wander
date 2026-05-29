@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
+
+# The body's mode vocabulary — the five demo-arc modes + `creature` (idle/default).
+ModeName = Literal["creature", "personal", "friend", "find", "wand", "meditation"]
 
 
 class OkResponse(BaseModel):
@@ -70,3 +73,15 @@ class MotionState(BaseModel):
     last_cmd_age_s: Optional[float] = None
     deadman_window: float
     connected: bool
+    mode: str = "creature"  # the body's active behavior mode (see ModeController)
+
+
+class ModeRequest(BaseModel):
+    """POST /mode body. The Literal makes an unknown mode a 422."""
+
+    mode: ModeName
+
+
+class ModeResult(BaseModel):
+    ok: bool = True
+    mode: str

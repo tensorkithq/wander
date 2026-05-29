@@ -37,3 +37,11 @@ def get_motion(request: Request):
     if motion is None:
         raise HTTPException(503, "motion controller not initialized")
     return motion
+
+
+def get_mode(request: Request):
+    """Yield the ModeController (the body's active-mode state machine)."""
+    mode_ctrl = getattr(request.app.state, "mode_ctrl", None)
+    if mode_ctrl is None:
+        raise HTTPException(503, "mode controller not initialized")
+    return mode_ctrl

@@ -103,12 +103,12 @@ def test_entering_find_mode_does_not_move_the_dog(client):
     translate. So immediately after entering find, /state must show no commanded
     motion attributable to the switch.
     """
+    client.post("/stop")  # known-stopped baseline (shared session server)
     resp = client.post("/mode", json={"mode": "find", "target": "Sarah"})
     assert resp.status_code == 200, resp.text
 
     state = client.get("/state").json()
-    # The switch itself issues no command: either nothing has ever been commanded
-    # (raw velocities zero) or the deadman has zeroed the effective velocity.
+    # The switch itself issues no command: the body stays as stopped as before.
     assert state["vx"] == 0 and state["vy"] == 0 and state["wz"] == 0, state
     assert state["moving"] is False, state
 
@@ -124,6 +124,7 @@ def test_enter_find_mode_without_target_is_handled_deliberately(client):
     error. When the wiring is decided this assertion should be tightened to the
     single chosen behavior.
     """
+    client.post("/stop")  # known-stopped baseline (shared session server)
     resp = client.post("/mode", json={"mode": "find"})
     assert resp.status_code in (200, 422), resp.text
 

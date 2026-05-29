@@ -782,17 +782,19 @@ paths:
     post:
       tags: [control]
       operationId: postMode
-      summary: Set the active behavior mode (PLANNED)
+      summary: Set the active behavior mode
       x-execution: local
       description: |
-        **PLANNED.**
+        **IMPLEMENTED** (hub `ControlRouter` + `ModeController`).
 
-        **What it does:** sets the body's active behavior mode, which colors how
-        Yugo reacts to wand/agent input (LED palette, motion tendencies, music
-        coupling). The mode is reflected in `/ws/state`.
+        **What it does:** sets the body's single active behavior mode — the
+        backbone the behavior modules (wand/personal/find/friend/meditation) plug
+        into. Switching serializes a clean `exit(previous)` → `enter(next)`
+        handoff. The mode is echoed `{ok, mode}`, surfaced on `GET /state`, and
+        (planned) published on `/ws/state`. Also readable via `GET /mode`.
 
         **Execution:** local — a body-side state switch that conditions
-        subsequent local behavior (may publish LED/posture changes over WebRTC).
+        subsequent local behavior (loops, Realtime personality, LED).
 
         **Side effects:** may change lamp/posture immediately depending on mode;
         does not by itself drive locomotion.
@@ -1456,6 +1458,10 @@ components:
         connected:
           type: boolean
           description: Live WebRTC connection state.
+        mode:
+          type: string
+          enum: [creature, personal, friend, find, wand, meditation]
+          description: The body's active behavior mode (see `POST /mode`).
 
     ActionInfo:
       type: object
