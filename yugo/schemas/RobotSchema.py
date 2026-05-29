@@ -80,6 +80,7 @@ class ModeRequest(BaseModel):
     """POST /mode body. The Literal makes an unknown mode a 422."""
 
     mode: ModeName
+    target: Optional[str] = None  # optional subject for find/friend (person to seek)
 
 
 class ModeResult(BaseModel):

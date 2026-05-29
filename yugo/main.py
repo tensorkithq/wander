@@ -7,9 +7,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from yugo.config import Base, SessionLocal, engine, settings
+from yugo.controllers.FindMode import FindMode
+from yugo.controllers.FrameSource import FrameSource
+from yugo.controllers.FriendMode import FriendMode
+from yugo.controllers.MindController import MindClient
 from yugo.controllers.ModeController import ModeController
 from yugo.controllers.MoodController import MoodLoop
 from yugo.controllers.MotionController import MotionController
+from yugo.controllers.PersonalMode import PersonalMode
 from yugo.routers import (
     ControlRouter,
     MoodRouter,
@@ -74,6 +79,20 @@ async def lifespan(app: FastAPI):
     # into). Stateless w.r.t. the dog — a mode switch never publishes velocity.
     app.state.mode_ctrl = ModeController()
 
+    # Mind integration: the cloud inference client + the latest-frame source the
+    # vision modes (personal/find/friend) feed. FrameSource is a no-op offline.
+    app.state.mind = MindClient(settings.mind.base_url)
+    frames = FrameSource(app.state.robot)
+    frames.start()
+    app.state.frames = frames
+
+    # Register the vision behavior modes into the mode machine. Each loop idles
+    # until its mode is active AND the camera is connected; it reads frames/mind/
+    # motion off app.state at runtime. (Bound methods keep the instances alive.)
+    for _cls, _name in ((PersonalMode, "personal"), (FindMode, "find"), (FriendMode, "friend")):
+        _m = _cls(app)
+        app.state.mode_ctrl.register(_name, enter=_m.enter, exit=_m.exit)
+
     # Ensure DB tables exist (idempotent safety net; alembic owns schema evolution).
     Base.metadata.create_all(bind=engine)
     # Mood loop: picks a mood every settings.mood.update_seconds (demo: random),
@@ -82,6 +101,7 @@ async def lifespan(app: FastAPI):
     mood.start()
     app.state.mood = mood
     yield
+    frames.stop()
     mood.stop_loop()
     motion.stop_loop()
     # robot background thread is a daemon; nothing else to tear down explicitly

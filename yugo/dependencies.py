@@ -45,3 +45,19 @@ def get_mode(request: Request):
     if mode_ctrl is None:
         raise HTTPException(503, "mode controller not initialized")
     return mode_ctrl
+
+
+def get_mind(request: Request):
+    """Yield the MindClient (the cloud inference server wrapper — vision + STT)."""
+    mind = getattr(request.app.state, "mind", None)
+    if mind is None:
+        raise HTTPException(503, "mind client not initialized")
+    return mind
+
+
+def get_frames(request: Request):
+    """Yield the FrameSource (latest camera frame as base64, for vision calls)."""
+    frames = getattr(request.app.state, "frames", None)
+    if frames is None:
+        raise HTTPException(503, "frame source not initialized")
+    return frames

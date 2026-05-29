@@ -31,6 +31,9 @@ class ModeController:
         self._lock = threading.RLock()
         self._mode = default
         self._handlers: dict[str, dict[str, Optional[Hook]]] = {}
+        # Optional subject for the active mode (e.g. find/friend target person),
+        # set via POST /mode {target}. Read by the mode loops as `mode_ctrl.target`.
+        self.target: Optional[str] = None
 
     @property
     def mode(self) -> str:
