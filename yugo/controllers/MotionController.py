@@ -109,7 +109,12 @@ class MotionController:
             self._ensure_walk_mode()
         with self._lock:
             self._cmd = (vx, vy, wz)
-            self._cmd_ts = time.monotonic()
+            # On a COLD start the loop is muted while RecoveryStand settles into a
+            # walk gait; start this nudge's deadman window at gait-ready (not at
+            # the press) so a single first nudge isn't zeroed during the settle —
+            # i.e. the FIRST `up` actually drives instead of only entering the gait.
+            # Warm/offline: _walk_enter_until is past/0, so this is just `now`.
+            self._cmd_ts = max(time.monotonic(), self._walk_enter_until)
             self._suspend_until = 0.0  # explicit motion overrides a trick mute
         return (vx, vy, wz)
 
