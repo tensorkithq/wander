@@ -182,11 +182,14 @@ def fire_spell(conn, trace) -> dict:
 
     `conn` may be None (offline) — then `fired` is False and nothing is published.
     Firing reuses RobotController.fire (the single trick path: SPORT_MOD publish
-    + the BalanceStand precondition for expressive moves).
+    + a BalanceStand precondition). We pass `ensure_balance=True` so EVERY spell
+    settles into an upright stance first — a spell trace can resolve to any
+    TRICK_TABLE move regardless of posture, and not every such move is listed in
+    NEEDS_BALANCE, so this guarantees new spells won't fail from a bad posture.
     """
     matched = spell_for_trace(trace.magnetometer, trace.accel)
     fired = False
     if conn is not None and conn.connection_ready.is_set():
-        RobotController.fire(conn, matched["move"])
+        RobotController.fire(conn, matched["move"], ensure_balance=True)
         fired = True
     return {"matched": matched, "fired": fired}

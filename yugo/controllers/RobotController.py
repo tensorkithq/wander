@@ -41,17 +41,20 @@ def action_catalog() -> list[dict]:
     ]
 
 
-def fire(conn, move: str) -> dict:
+def fire(conn, move: str, ensure_balance: bool = False) -> dict:
     """Publish a single SPORT_CMD move over WebRTC.
 
     Expressive moves in NEEDS_BALANCE are ignored unless Yugo is upright, so we
     prepend BalanceStand and let it settle (`trick_balance_settle_s`) first.
+    Pass `ensure_balance=True` to force that precondition for ANY move — used by
+    spell casting so a new TRICK_TABLE move (not yet listed in NEEDS_BALANCE)
+    can't silently fail from a non-upright posture.
     Note: the returned dict is a PUBLISH ack, not an execution ack.
     """
     cmd_id = SPORT_CMD.get(move)
     if cmd_id is None:
         raise HTTPException(404, f"unknown move {move!r} — see GET /tricks")
-    if move in NEEDS_BALANCE:
+    if ensure_balance or move in NEEDS_BALANCE:
         conn.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": SPORT_CMD["BalanceStand"]})
         time.sleep(settings.motion.trick_balance_settle_s)
     conn.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": cmd_id})
