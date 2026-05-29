@@ -13,9 +13,9 @@ to Yugo."
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 
-from yugo.controllers import AgentController
+from yugo.controllers import AgentController, RealtimeSession
 from yugo.controllers.AgentController import AgentUnavailable
 from yugo.schemas.AgentSchema import AgentReply, AgentSay
 
@@ -29,3 +29,11 @@ def agent_say(body: AgentSay, request: Request) -> AgentReply:
     except AgentUnavailable as e:
         # Mind/OpenAI unreachable — never fabricate a reply; the body stays safe.
         raise HTTPException(502, f"agent unavailable (OpenAI unreachable): {e}")
+
+
+@router.websocket("/agent/realtime")
+async def agent_realtime(ws: WebSocket) -> None:
+    """Voice path: secure bridge to the OpenAI Realtime session. The body holds
+    the key and runs tool calls in-process (same registry as /agent/say); the
+    client relays audio/events. No key → the socket closes with an error status."""
+    await RealtimeSession.bridge(ws, ws.app)
