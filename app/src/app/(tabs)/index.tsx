@@ -24,7 +24,6 @@ import { font } from '@/lib/typography';
 
 const MODES: { id: YugoMode; label: string }[] = [
   { id: 'creature', label: 'Creature' },
-  { id: 'wand', label: 'Wand' },
   { id: 'personal', label: 'Personal' },
   { id: 'find', label: 'Find' },
   { id: 'friend', label: 'Friend' },
