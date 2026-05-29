@@ -67,11 +67,12 @@ def trick(name: str, conn=Depends(get_robot), motion=Depends(get_motion)):
 
 @router.post("/sleep", response_model=TrickResult)
 def sleep(conn=Depends(get_robot), motion=Depends(get_motion)):
-    """Park Yugo safely: RecoveryStand → StandDown → Damp (the 'sleep' state).
+    """Park Yugo: RecoveryStand → Damp (the 'sleep' state).
 
-    Stands to a stable stance first (so an active robot doesn't collapse), then
-    lies down and goes limp. Distinct from /stop (instant halt, stays standing).
-    The next nav nudge will auto-RecoveryStand back into a walk gait.
+    Recovers to a stable stance first (so an active robot reaches a known posture),
+    then Damp releases the motors and the dog sinks to the ground. Distinct from
+    /stop (instant halt, stays standing). The next nav nudge auto-RecoveryStands
+    back into a walk gait.
     """
     motion.suspend()  # mute the velocity loop so it can't clobber the sequence
     return RobotController.sleep(conn)
@@ -135,7 +136,10 @@ def state(motion=Depends(get_motion), mode_ctrl=Depends(get_mode)):
 def set_mode(req: ModeRequest, mode_ctrl=Depends(get_mode)):
     """Switch the body's active mode. A mode switch never moves the dog — it only
     conditions which loops/personality/LED are active; locomotion always flows
-    through the clamped/deadman path. Unknown modes are rejected (422)."""
+    through the clamped/deadman path. Unknown modes are rejected (422). An
+    optional `target` (the person find/friend should seek) is stored for the loop."""
+    if req.target is not None:
+        mode_ctrl.target = req.target
     return ModeResult(mode=mode_ctrl.set_mode(req.mode))
 
 

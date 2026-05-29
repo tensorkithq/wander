@@ -52,6 +52,9 @@ class MotionConfig(BaseModel):
     # (the joystick only walks in locomotion mode, not BalanceStand/posture). The
     # velocity loop is muted this long while RecoveryStand settles.
     walk_enter_settle_s: float = 1.5
+    # /sleep: StandDown (lie-down) takes longer to finish than a stance settle; if
+    # Damp fires mid-motion it's ignored. Wait this long after StandDown before Damp.
+    sleep_lie_settle_s: float = 3.6
 
 
 class MindConfig(BaseModel):

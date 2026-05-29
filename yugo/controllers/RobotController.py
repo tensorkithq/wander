@@ -72,9 +72,11 @@ def sleep(conn) -> dict:
     → Damp (motors go limp). A settle between steps lets each finish before the
     next, so it never collapses from standing.
     """
-    settle = settings.motion.trick_balance_settle_s
     fire(conn, "RecoveryStand")
-    time.sleep(settle)
+    time.sleep(settings.motion.trick_balance_settle_s)
     fire(conn, "StandDown")
-    time.sleep(settle)
-    return fire(conn, "Damp")
+    # StandDown's lie-down takes longer than a stance settle; wait it out, else
+    # Damp fires mid-motion and the dog ignores it (never goes limp).
+    time.sleep(settings.motion.sleep_lie_settle_s)
+    last_move = fire(conn, "Damp")
+    return { "ok": True, "move": last_move, "api_id": 1001 }
