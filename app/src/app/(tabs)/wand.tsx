@@ -27,10 +27,6 @@ const COMPASS_SIZE = Math.min(SW - 60, 320);
 const SPELL_SAMPLE_HZ = 50;
 const SPELL_INTERVAL_MS = Math.round(1000 / SPELL_SAMPLE_HZ);
 const SPELL_MAX_SAMPLES = 400; // ~8 s cap
-// Ambient /sensor stream cap. The body only keeps the latest reading (overwrites
-// last_sensor each POST), so a fast stream is pure waste — 2 Hz drives the aura
-// fine. The on-screen field intensity is computed locally, not from this stream.
-const AMBIENT_STREAM_THROTTLE_MS = 500; // 2 Hz
 
 // Direction sub-mode (gyro).
 type Direction = 'left' | 'right' | 'up' | 'down' | null;
@@ -159,7 +155,6 @@ export default function WandScreen() {
   const castStartRef = useRef(0);
   const castMagBufRef = useRef<SpellSample[]>([]);
   const castAccelBufRef = useRef<SpellSample[]>([]);
-  const lastStreamRef = useRef(0);
   const lastAccelRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const lastMagRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const lastSwingRef = useRef(0);
@@ -217,18 +212,7 @@ export default function WandScreen() {
             }
           }
 
-          // Ambient stream (throttled) — drives Yugo's aura.
-          const now = Date.now();
-          if (now - lastStreamRef.current > AMBIENT_STREAM_THROTTLE_MS) {
-            lastStreamRef.current = now;
-            sensorStream({
-              magnetometer: { x, y, z },
-              accel: lastAccelRef.current,
-              gesture: isCastingRef.current ? 'cast' : undefined,
-            });
-          }
-
-          // Intensity readout for the dial.
+          // Intensity readout for the dial (local only — no network).
           const norm = Math.min(1, Math.max(0, (mag - 50) / 150));
           setIntensity(norm);
           setFieldIntensity(norm);
@@ -302,6 +286,14 @@ export default function WandScreen() {
     if (!isCastingRef.current) return;
     isCastingRef.current = false;
     setIsCasting(false);
+
+    // One /sensor per gesture: send only the final reading on release, never a stream.
+    sensorStream({
+      magnetometer: lastMagRef.current,
+      accel: lastAccelRef.current,
+      gesture: 'cast',
+    });
+
     const mag = castMagBufRef.current.slice();
     const accel = castAccelBufRef.current.slice();
     castGlow.value = withTiming(0, { duration: 300 });
