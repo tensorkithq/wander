@@ -12,3 +12,6 @@ motion:
 mood:
   update_seconds: 90       # demo: pick a random mood this often (random until vision lands)
   poll_seconds: 15         # cadence the mobile app should poll GET /api/moods/current
+
+mind:
+  base_url: "https://openbeam.tensorkit.net"   # cloud inference / "mind" server (vision, reasoning)

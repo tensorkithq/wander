@@ -54,6 +54,13 @@ class MotionConfig(BaseModel):
     walk_enter_settle_s: float = 1.5
 
 
+class MindConfig(BaseModel):
+    # The cloud "mind" / inference server the body delegates intelligence to —
+    # GPT-4o vision (mood/target), the Realtime context wrapper, etc. The body is
+    # local + torch-free; the mind is remote. Override with the YUGO_MIND_URL env.
+    base_url: str = "https://openbeam.tensorkit.net"
+
+
 class MoodConfig(BaseModel):
     # The body picks a mood every `update_seconds` and (demo) it's random until a
     # vision source replaces it. `poll_seconds` is the cadence the mobile app
@@ -67,6 +74,7 @@ class Settings(BaseModel):
     robot: RobotConfig = RobotConfig()
     motion: MotionConfig = MotionConfig()
     mood: MoodConfig = MoodConfig()
+    mind: MindConfig = MindConfig()
 
 
 def _load_settings() -> Settings:
@@ -84,6 +92,9 @@ def _load_settings() -> Settings:
     # Tests/dev shrink the mood interval to observe changes quickly.
     if os.environ.get("YUGO_MOOD_SECONDS"):
         s.mood.update_seconds = float(os.environ["YUGO_MOOD_SECONDS"])
+    # Point the body at a different mind/inference server (e.g. local/staging).
+    if os.environ.get("YUGO_MIND_URL"):
+        s.mind.base_url = os.environ["YUGO_MIND_URL"]
     return s
 
 
