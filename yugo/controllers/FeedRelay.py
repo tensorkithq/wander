@@ -92,6 +92,22 @@ class FeedRelay:
         with self._lock:
             self._latest = frame
 
+    def _ingest_frame(self, sframe) -> None:
+        """Normalize a frame from the dog's `raw_video_stream()` to an
+        `av.VideoFrame`. dimos emits `SerializableVideoFrame` (an rgb24 ndarray
+        wrapper), NOT `av.VideoFrame` — handing the wrapper to aiortc/JPEG yields
+        black video, so convert via its rgb24 ndarray."""
+        try:
+            import av
+
+            if isinstance(sframe, av.VideoFrame):
+                self.set_frame(sframe)
+                return
+            arr = sframe.to_ndarray(format="rgb24")
+            self.set_frame(av.VideoFrame.from_ndarray(arr, format="rgb24"))
+        except Exception:
+            pass
+
     def latest(self):
         with self._lock:
             return self._latest
@@ -135,7 +151,7 @@ class FeedRelay:
         try:
             obs = conn.raw_video_stream()  # Observable[av.VideoFrame] (dimos)
             self._subscription = obs.subscribe(
-                on_next=self.set_frame,
+                on_next=self._ingest_frame,
                 on_error=lambda _e: self._mark_source(False),
                 on_completed=lambda: self._mark_source(False),
             )
