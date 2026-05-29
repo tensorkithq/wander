@@ -18,6 +18,7 @@ from yugo.controllers.MotionController import MotionController
 from yugo.controllers.PersonalMode import PersonalMode
 from yugo.controllers.StateAggregator import StateAggregator
 from yugo.routers import (
+    AgentRouter,
     ControlRouter,
     FeedRouter,
     MoodRouter,
@@ -142,6 +143,7 @@ app.include_router(OwnerRouter.router)
 app.include_router(MoodRouter.router)
 app.include_router(TelemetryRouter.router)
 app.include_router(FeedRouter.router)
+app.include_router(AgentRouter.router)
 
 
 @app.get("/")
