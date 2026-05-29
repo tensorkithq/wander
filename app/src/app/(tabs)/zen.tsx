@@ -7,10 +7,9 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import useYugoStore from '@/lib/state/yugo-store';
-import { sit, setMode } from '@/lib/api/yugo-api';
+import { sit, trick, setMode } from '@/lib/api/yugo-api';
 import { font } from '@/lib/typography';
 import YugoOrb from '@/components/YugoOrb';
 
@@ -139,7 +138,7 @@ export default function ZenScreen() {
       setMood('meditation');
       storeSetMode('meditation');
       setMode('meditation');
-      sit();
+      sit(); // dedicated /sit route — zen posture
     }
   }, [active, setMood, storeSetMode]);
 
@@ -183,10 +182,12 @@ export default function ZenScreen() {
   const promptStyle = useAnimatedStyle(() => ({ opacity: promptOpacity.value }));
 
   const phase = PHASES[phaseIdx];
-  const phaseLabel = active ? phase?.label ?? 'Breathe' : 'Tap to begin';
 
   const toggle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Ending the session → stand the dog back up. (active is the pre-toggle value,
+    // so this only fires on a real END press, never on mount.)
+    if (active) trick('BalanceStand');
     setActive((a) => !a);
     setPhaseIdx(0);
   };
@@ -218,21 +219,6 @@ export default function ZenScreen() {
           <BreathRing phase={phase?.id ?? 'holdOut'} active={active} />
           <InnerHalo phase={phase?.id ?? 'holdOut'} active={active} />
           <YugoOrb size={ORB_SIZE} showGlow overrideColor={MEDITATION_COLOR} overridePulseDuration={6000} />
-
-          {/* Phase label */}
-          <Text
-            style={{
-              fontFamily: font.light,
-              color: '#FFFFFF',
-              fontSize: 22,
-              letterSpacing: 1,
-              marginTop: ORB_SIZE * 0.7,
-              position: 'absolute',
-              bottom: -ORB_SIZE * 0.3,
-            }}
-          >
-            {phaseLabel}
-          </Text>
         </View>
 
         {/* Prompt */}
