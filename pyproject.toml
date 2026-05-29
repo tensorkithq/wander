@@ -7,10 +7,17 @@ dependencies = [
     "dimos==0.0.12.post2",
     "fastapi",
     "uvicorn",
+    "websockets",  # uvicorn WebSocket transport for /ws/state
     "unitree-webrtc-connect-leshy",
     "sqlalchemy>=2.0",
     "alembic",
     "pyyaml",
+    # Camera feed relay (MJPEG + WebRTC). av/numpy are transitive via aiortc but
+    # the feed code uses them directly, so declare them explicitly.
+    "aiortc",
+    "av",
+    "numpy",
+    "pillow",
 ]
 
 # Application, not a library: the root coordinates flat runnable code

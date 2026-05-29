@@ -3428,13 +3428,18 @@ name = "yugo"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiortc" },
     { name = "alembic" },
+    { name = "av" },
     { name = "dimos" },
     { name = "fastapi" },
+    { name = "numpy" },
+    { name = "pillow" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -3445,13 +3450,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiortc" },
     { name = "alembic" },
+    { name = "av" },
     { name = "dimos", specifier = "==0.0.12.post2" },
     { name = "fastapi" },
+    { name = "numpy" },
+    { name = "pillow" },
     { name = "pyyaml" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.metadata.requires-dev]

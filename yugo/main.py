@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from yugo.config import Base, SessionLocal, engine, settings
+from yugo.controllers.FeedRelay import FeedRelay
 from yugo.controllers.FindMode import FindMode
 from yugo.controllers.FrameSource import FrameSource
 from yugo.controllers.FriendMode import FriendMode
@@ -15,12 +16,15 @@ from yugo.controllers.ModeController import ModeController
 from yugo.controllers.MoodController import MoodLoop
 from yugo.controllers.MotionController import MotionController
 from yugo.controllers.PersonalMode import PersonalMode
+from yugo.controllers.StateAggregator import StateAggregator
 from yugo.routers import (
     ControlRouter,
+    FeedRouter,
     MoodRouter,
     OwnerRouter,
     SensorRouter,
     SystemRouter,
+    TelemetryRouter,
 )
 
 _DOC_PATHS = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
@@ -100,7 +104,20 @@ async def lifespan(app: FastAPI):
     mood = MoodLoop(app.state.robot, motion, SessionLocal, settings.mood)
     mood.start()
     app.state.mood = mood
+
+    # Aggregated telemetry source for the /ws/state push (connection + mode +
+    # last-known mood, plus battery when the dog is connected).
+    app.state.state_agg = StateAggregator(
+        motion, app.state.mode_ctrl, SessionLocal, app.state.robot
+    )
+
+    # Camera feed relay (MJPEG + WebRTC). Sources frames from the dog's decoded
+    # video stream; YUGO_FEED_FAKE=1 substitutes synthetic color bars (no dog).
+    feed = FeedRelay(app.state.robot, settings.feed, fake=bool(os.environ.get("YUGO_FEED_FAKE")))
+    feed.start()
+    app.state.feed = feed
     yield
+    feed.close()
     frames.stop()
     mood.stop_loop()
     motion.stop_loop()
@@ -123,6 +140,8 @@ app.include_router(ControlRouter.router)
 app.include_router(SensorRouter.router)
 app.include_router(OwnerRouter.router)
 app.include_router(MoodRouter.router)
+app.include_router(TelemetryRouter.router)
+app.include_router(FeedRouter.router)
 
 
 @app.get("/")

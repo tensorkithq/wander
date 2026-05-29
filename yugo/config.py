@@ -57,6 +57,13 @@ class MotionConfig(BaseModel):
     sleep_lie_settle_s: float = 3.6
 
 
+class FeedConfig(BaseModel):
+    # Camera feed (MJPEG + WebRTC relay). LAN-only: no ICE servers needed.
+    target_fps: float = 15.0  # pacing for both the MJPEG stream and WebRTC track
+    max_viewers: int = 4  # soft cap; advisory at this scale
+    jpeg_quality: int = 80  # MJPEG encode quality
+
+
 class MindConfig(BaseModel):
     # The cloud "mind" / inference server the body delegates intelligence to —
     # GPT-4o vision (mood/target), the Realtime context wrapper, etc. The body is
@@ -78,6 +85,7 @@ class Settings(BaseModel):
     motion: MotionConfig = MotionConfig()
     mood: MoodConfig = MoodConfig()
     mind: MindConfig = MindConfig()
+    feed: FeedConfig = FeedConfig()
 
 
 def _load_settings() -> Settings:

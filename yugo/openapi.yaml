@@ -30,12 +30,11 @@
 # (port 8080) as one router. The deadman + /cmd_vel formerly lived only on the
 # WebBridge; the hub is now canonical.
 #
-# DEPRECATION (this release): yugo/bridge/web_bridge.py is DEPRECATED. Its teleop
-# /cmd_vel + /stop + deadman are superseded by the hub. Only the MJPEG camera
-# (/video_feed/color_image) has no hub equivalent yet — that capability is the
-# sole remaining reason to run the bridge, and it will move to the hub
-# (telemetry) before the bridge is removed. Do not build new clients against
-# :5555. See yugo/bridge/web_bridge.py header for the migration map.
+# DEPRECATION (this release): yugo/bridge/web_bridge.py is DEPRECATED and now has
+# NO unique capability. Its teleop /cmd_vel + /stop + deadman are superseded by
+# the hub, and its MJPEG camera (/video_feed/color_image) is superseded by the
+# hub's `GET /feed` (+ WebRTC `/feed/offer`). The bridge can be removed. Do not
+# build new clients against :5555. See yugo/bridge/web_bridge.py for the map.
 # =============================================================================
 
 openapi: 3.1.0
@@ -935,9 +934,13 @@ paths:
       summary: Live state WebSocket (~10–20 Hz push)
       x-execution: local
       description: |
-        **PLANNED.** Documented here as an operation; this endpoint is a
-        **WebSocket upgrade**, not a plain HTTP GET. Connect with `ws://` (e.g.
-        `ws://localhost:5555/ws/state`).
+        **IMPLEMENTED** (hub `TelemetryRouter` + `StateAggregator`). This endpoint
+        is a **WebSocket upgrade**, not a plain HTTP GET. Connect with `ws://`
+        (e.g. `ws://localhost:8080/ws/state`).
+
+        Offline (`YUGO_NO_ROBOT=1`) the stream still pushes: `connected:false`,
+        robot-sourced fields (battery/pose/imu) omitted, while `mode` + last-known
+        `mood` keep flowing.
 
         **What it does:** after the upgrade, the body **pushes** an aggregated
         state frame at ~10–20 Hz. This drives the app's "aura". The payload
@@ -975,6 +978,111 @@ paths:
                       - { label: "person", bbox: [120, 60, 240, 380], confidence: 0.91 }
                     person_count: 1
                     audio_level: 0.34
+
+  /feed:
+    get:
+      tags: [telemetry]
+      operationId: getFeed
+      summary: MJPEG camera stream (hub)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `FeedRouter` + `FeedRelay`). The camera on the hub
+        (:8080), superseding the deprecated WebBridge `/video_feed/color_image`
+        (:5555). Serves the dog's color camera as a continuous
+        `multipart/x-mixed-replace` MJPEG stream (boundary `frame`, parts
+        `image/jpeg`). Frames are sourced from the dog's decoded video stream;
+        `YUGO_FEED_FAKE=1` substitutes synthetic color bars (no dog).
+
+        **Offline / no frame source:** returns `503` ("no video source"). The
+        sibling WebRTC path (`POST /feed/offer`) serves the same frames to a
+        viewer's peer connection; the cockpit viewer is at `GET /feed/cockpit`.
+
+        **Safety:** read-only; non-critical telemetry (shares no state with the
+        deadman/reflex layer).
+      responses:
+        '200':
+          description: An open MJPEG multipart stream.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+                description: "Repeating `--frame` parts, each `Content-Type: image/jpeg`."
+        '503':
+          description: No frame source (offline / no synthetic source).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /feed/offer:
+    post:
+      tags: [telemetry]
+      operationId: postFeedOffer
+      summary: WebRTC signaling (WHIP-style) → SDP answer
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `FeedRouter` + `FeedRelay`). Single-shot,
+        non-trickle signaling: the viewer POSTs its SDP offer (with host ICE
+        candidates bundled); the hub creates a peer connection, attaches the
+        live camera track, and returns its SDP answer. LAN-only (no STUN/TURN).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SdpOffer' }
+      responses:
+        '200':
+          description: SDP answer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SdpAnswer' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: No frame source (offline / no synthetic source).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '504':
+          description: Signaling/ICE did not complete in time; retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /feed/health:
+    get:
+      tags: [telemetry]
+      operationId: getFeedHealth
+      summary: Feed relay state
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `FeedRouter`). Relay state, assertable over HTTP:
+        active viewer count and whether a frame source is attached.
+      responses:
+        '200':
+          description: Relay state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedHealth' }
+              examples:
+                active: { value: { viewers: 1, source_active: true } }
+
+  /feed/cockpit:
+    get:
+      tags: [telemetry]
+      operationId: getFeedCockpit
+      summary: HTML cockpit (WebRTC video + telemetry panes)
+      x-execution: local
+      description: |
+        **IMPLEMENTED** (hub `FeedRouter`). A self-contained HTML page: a WebRTC
+        video pane (signals against `POST /feed/offer`) plus telemetry panes fed
+        by `WS /ws/state`. Replaces the deprecated WebBridge debug client.
+      responses:
+        '200':
+          description: The cockpit HTML.
+          content:
+            text/html:
+              schema: { type: string }
 
   # ===========================================================================
   # AGENT  (delegates-to-mind)
@@ -1596,6 +1704,30 @@ components:
           minimum: 0
           maximum: 1
           description: Normalized ambient audio level, 0..1.
+
+    SdpOffer:
+      type: object
+      description: WHIP-style WebRTC offer (the `POST /feed/offer` body).
+      required: [sdp]
+      properties:
+        sdp: { type: string, description: The viewer's SDP offer. }
+        type: { type: string, enum: [offer], default: offer }
+
+    SdpAnswer:
+      type: object
+      description: The hub's SDP answer returned from `POST /feed/offer`.
+      required: [sdp, type]
+      properties:
+        sdp: { type: string, description: The hub's SDP answer. }
+        type: { type: string, enum: [answer] }
+
+    FeedHealth:
+      type: object
+      description: Feed relay state (`GET /feed/health`).
+      required: [viewers, source_active]
+      properties:
+        viewers: { type: integer, minimum: 0, description: Active WebRTC peer connections. }
+        source_active: { type: boolean, description: Whether a frame source (dog/synthetic) is attached. }
 
     SensorReading:
       type: object

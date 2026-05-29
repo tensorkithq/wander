@@ -86,3 +86,24 @@ class ModeRequest(BaseModel):
 class ModeResult(BaseModel):
     ok: bool = True
     mode: str
+
+
+class SdpOffer(BaseModel):
+    """WHIP-style signaling: the browser's SDP offer (POST /feed/offer body)."""
+
+    sdp: str
+    type: Literal["offer"] = "offer"
+
+
+class SdpAnswer(BaseModel):
+    """The hub's SDP answer returned from POST /feed/offer."""
+
+    sdp: str
+    type: Literal["answer"] = "answer"
+
+
+class FeedHealth(BaseModel):
+    """GET /feed/health — relay state observable over HTTP."""
+
+    viewers: int  # active WebRTC peer connections
+    source_active: bool  # is a frame source attached (dog or synthetic)

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yugo cockpit</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #0b0d12; color: #e6e9ef; font: 14px/1.4 system-ui, sans-serif; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; padding: 12px; height: 100vh; box-sizing: border-box; }
+    .pane { background: #141821; border: 1px solid #232a36; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+    .pane h2 { margin: 0; padding: 8px 12px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #8b94a7; border-bottom: 1px solid #232a36; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .side { display: grid; grid-template-rows: auto 1fr; gap: 12px; }
+    .vitals { padding: 12px; display: grid; gap: 8px; }
+    .row { display: flex; justify-content: space-between; }
+    .k { color: #8b94a7; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #555; }
+    .dot.on { background: #46d369; }
+    pre { margin: 0; padding: 12px; overflow: auto; color: #aeb6c6; font-size: 12px; }
+    #mood { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <section class="pane">
+      <h2>Porthole — what Yugo sees</h2>
+      <video id="video" autoplay playsinline muted></video>
+    </section>
+    <div class="side">
+      <section class="pane">
+        <h2>Vitals</h2>
+        <div class="vitals">
+          <div class="row"><span class="k">link</span><span><span id="dot" class="dot"></span> <span id="conn">…</span></span></div>
+          <div class="row"><span class="k">mode</span><span id="mode">…</span></div>
+          <div class="row"><span class="k">mood</span><span id="mood">…</span></div>
+          <div class="row"><span class="k">battery</span><span id="battery">—</span></div>
+          <div class="row"><span class="k">webrtc</span><span id="pc">idle</span></div>
+        </div>
+      </section>
+      <section class="pane">
+        <h2>State stream</h2>
+        <pre id="raw">connecting…</pre>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // --- WebRTC video (WHIP-style single-shot signaling against /feed/offer) ---
+    async function startVideo() {
+      const pcEl = document.getElementById("pc");
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        pc.addTransceiver("video", { direction: "recvonly" });
+        pc.ontrack = (e) => { document.getElementById("video").srcObject = e.streams[0]; };
+        pc.onconnectionstatechange = () => { pcEl.textContent = pc.connectionState; };
+
+        await pc.setLocalDescription(await pc.createOffer());
+        // Wait for ICE gathering to finish so the offer bundles host candidates.
+        await new Promise((resolve) => {
+          if (pc.iceGatheringState === "complete") return resolve();
+          pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
+        });
+
+        const res = await fetch("/feed/offer", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+        });
+        if (!res.ok) { pcEl.textContent = "offer " + res.status; return; }
+        const answer = await res.json();
+        await pc.setRemoteDescription(answer);
+      } catch (err) {
+        pcEl.textContent = "error";
+        console.error(err);
+      }
+    }
+
+    // --- Telemetry (/ws/state) ---
+    function startState() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/state`);
+      ws.onmessage = (ev) => {
+        const f = JSON.parse(ev.data);
+        document.getElementById("raw").textContent = JSON.stringify(f, null, 2);
+        const on = !!f.connected;
+        document.getElementById("dot").className = "dot" + (on ? " on" : "");
+        document.getElementById("conn").textContent = on ? "connected" : "offline";
+        if (f.mode) document.getElementById("mode").textContent = f.mode;
+        if (f.mood) {
+          const m = f.mood;
+          const el = document.getElementById("mood");
+          el.textContent = `${m.label} (${m.scalar})`;
+          el.style.color = m.color || "";
+        }
+        document.getElementById("battery").textContent =
+          typeof f.battery === "number" ? Math.round(f.battery * 100) + "%" : "—";
+      };
+      ws.onclose = () => setTimeout(startState, 1000); // auto-reconnect
+    }
+
+    startVideo();
+    startState();
+  </script>
+</body>
+</html>
