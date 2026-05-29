@@ -31,8 +31,9 @@ interface YugoState {
   setBridgeUrl: (url: string) => void;
 
   // Yugo state (from WS)
-  mood: YugoMood;
+  mood: YugoMood; // drives the local pulse table; '' label falls back to this
   moodColor: string; // hex from the body's mood frame; '' falls back to MOOD_COLORS
+  moodLabel: string; // the body's actual mood word (e.g. "zen"), for display
   mode: YugoMode;
   battery: number;
   ledColor: string;
@@ -87,6 +88,7 @@ const useYugoStore = create<YugoState>()(
       // Yugo defaults
       mood: 'idle',
       moodColor: '',
+      moodLabel: 'idle',
       mode: 'creature',
       battery: 100,
       ledColor: '#94A3B8',
@@ -197,11 +199,13 @@ const useYugoStore = create<YugoState>()(
         if (d.mood && typeof d.mood === 'object') {
           const m = d.mood as Record<string, unknown>;
           if (typeof m.color === 'string') updates.moodColor = m.color;
-          if (typeof m.label === 'string' && m.label in MOOD_COLORS) {
-            updates.mood = m.label as YugoMood;
+          if (typeof m.label === 'string') {
+            updates.moodLabel = m.label;
+            if (m.label in MOOD_COLORS) updates.mood = m.label as YugoMood;
           }
-        } else if (typeof d.mood === 'string' && d.mood in MOOD_COLORS) {
-          updates.mood = d.mood as YugoMood;
+        } else if (typeof d.mood === 'string') {
+          updates.moodLabel = d.mood;
+          if (d.mood in MOOD_COLORS) updates.mood = d.mood as YugoMood;
         }
         if (typeof d.mode === 'string' && ['creature', 'wand', 'personal', 'find', 'friend', 'meditation'].includes(d.mode)) {
           updates.mode = d.mode as YugoMode;
@@ -226,9 +230,13 @@ const useYugoStore = create<YugoState>()(
     {
       name: 'yugo-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist bridgeUrl — everything else is live state
+      // bridgeUrl is hardcoded to DEFAULT_BRIDGE_URL: it is never persisted, and
+      // any value saved by an earlier build is overridden on load. Change the
+      // target by editing DEFAULT_BRIDGE_URL.
+      merge: (persisted, current) =>
+        ({ ...current, ...(persisted as object), bridgeUrl: DEFAULT_BRIDGE_URL }) as YugoState,
+      // Persist only the user toggles — bridgeUrl is hardcoded above.
       partialize: (state) => ({
-        bridgeUrl: state.bridgeUrl,
         wandInverted: state.wandInverted,
         navInverted: state.navInverted,
       }),

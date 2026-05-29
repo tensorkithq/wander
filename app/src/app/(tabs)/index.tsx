@@ -11,9 +11,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import useYugoStore, { useMoodColor, MOOD_COLORS } from '@/lib/state/yugo-store';
+import useYugoStore, { useMoodColor } from '@/lib/state/yugo-store';
 import type { YugoMode } from '@/lib/state/yugo-store';
 import { setMode } from '@/lib/api/yugo-api';
 import YugoOrb from '@/components/YugoOrb';
@@ -55,6 +54,7 @@ function BatteryIcon({ level }: { level: number }) {
 export default function PortholeScreen() {
   const bridgeUrl = useYugoStore((s) => s.bridgeUrl);
   const mood = useYugoStore((s) => s.mood);
+  const moodName = useYugoStore((s) => s.moodLabel);
   const mode = useYugoStore((s) => s.mode);
   const battery = useYugoStore((s) => s.battery);
   const personCount = useYugoStore((s) => s.personCount);
@@ -110,7 +110,8 @@ export default function PortholeScreen() {
     }
   }, [lastUtterance, captionOpacity]);
 
-  const moodLabel = mood.charAt(0).toUpperCase() + mood.slice(1);
+  const moodSrc = moodName || mood;
+  const moodLabel = moodSrc.charAt(0).toUpperCase() + moodSrc.slice(1);
 
   return (
     <MoodBackground>
