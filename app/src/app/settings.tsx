@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import useYugoStore, { useMoodColor } from '@/lib/state/yugo-store';
+import useYugoStore, { useMoodColor, BRIDGE_HEADERS } from '@/lib/state/yugo-store';
 import {
   getDeepgramKey,
   getElevenLabsKey,
@@ -112,7 +112,7 @@ export default function SettingsScreen() {
     try {
       const ctrl = new AbortController();
       const timeout = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch(`${url}/health`, { signal: ctrl.signal });
+      const res = await fetch(`${url}/healthz`, { signal: ctrl.signal, headers: BRIDGE_HEADERS });
       clearTimeout(timeout);
       setConn(res.ok ? 'ok' : 'fail');
       Haptics.notificationAsync(

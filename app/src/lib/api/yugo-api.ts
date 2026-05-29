@@ -1,4 +1,4 @@
-import useYugoStore from '@/lib/state/yugo-store';
+import useYugoStore, { BRIDGE_HEADERS } from '@/lib/state/yugo-store';
 import type { YugoMode } from '@/lib/state/yugo-store';
 
 function getBridgeUrl(): string {
@@ -17,8 +17,8 @@ async function bridgeFetch(
   try {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       ...options,
+      headers: { 'Content-Type': 'application/json', ...BRIDGE_HEADERS, ...options.headers },
     });
     if (res.status === 204) return undefined;
     const ct = res.headers.get('content-type') ?? '';
@@ -112,6 +112,8 @@ export async function agentSay(text: string): Promise<{ reply: string }> {
   });
   if (result && typeof result === 'object') {
     const r = result as Record<string, unknown>;
+    // Body returns { reply_text, behavior }; tolerate a bare { reply } too.
+    if (typeof r.reply_text === 'string') return { reply: r.reply_text };
     if (typeof r.reply === 'string') return { reply: r.reply };
   }
   return { reply: '' };
@@ -176,11 +178,3 @@ export async function sensorSpell(payload: SpellCastPayload): Promise<SpellCastR
   return { ok: false };
 }
 
-// --- Misc (used by zen) ---------------------------------------------------
-
-export async function breathe(
-  phase: 'inhale' | 'exhale',
-  duration: number
-): Promise<void> {
-  await bridgeFetch('/breathe', { body: JSON.stringify({ phase, duration }) });
-}

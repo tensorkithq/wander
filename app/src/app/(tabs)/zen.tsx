@@ -10,7 +10,7 @@ import Animated, {
 import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import useYugoStore from '@/lib/state/yugo-store';
-import { breathe, setMode } from '@/lib/api/yugo-api';
+import { sit, setMode } from '@/lib/api/yugo-api';
 import { font } from '@/lib/typography';
 import YugoOrb from '@/components/YugoOrb';
 
@@ -133,12 +133,13 @@ export default function ZenScreen() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const promptTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lock mood to meditation locally when active
+  // Lock mood to meditation locally when active, and sit the dog (zen posture).
   useEffect(() => {
     if (active) {
       setMood('meditation');
       storeSetMode('meditation');
       setMode('meditation');
+      sit();
     }
   }, [active, setMood, storeSetMode]);
 
@@ -151,9 +152,6 @@ export default function ZenScreen() {
     const phase = PHASES[phaseIdx];
     if (!phase) return;
     Haptics.selectionAsync();
-    if (phase.id === 'inhale' || phase.id === 'exhale') {
-      breathe(phase.id, phase.duration);
-    }
     timeoutRef.current = setTimeout(() => {
       setPhaseIdx((i) => (i + 1) % PHASES.length);
     }, phase.duration);

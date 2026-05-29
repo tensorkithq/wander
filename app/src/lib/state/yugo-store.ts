@@ -13,6 +13,17 @@ export const MOOD_COLORS: Record<YugoMood, { color: string; pulseDuration: numbe
   idle: { color: '#94A3B8', pulseDuration: 3000 },
 };
 
+// Default bridge URL — the current ngrok tunnel to the FastAPI body.
+// Override in Settings; the entered value persists and wins over this default.
+export const DEFAULT_BRIDGE_URL = 'https://willette-multicapitate-limnologically.ngrok-free.dev';
+
+// Sent on every request to the bridge. ngrok-free serves an HTML interstitial
+// to browser-like clients unless this header is present — without it, fetch and
+// the WS handshake receive HTML instead of the real response.
+export const BRIDGE_HEADERS: Record<string, string> = {
+  'ngrok-skip-browser-warning': 'true',
+};
+
 interface YugoState {
   // Connection
   bridgeUrl: string;
@@ -21,6 +32,7 @@ interface YugoState {
 
   // Yugo state (from WS)
   mood: YugoMood;
+  moodColor: string; // hex from the body's mood frame; '' falls back to MOOD_COLORS
   mode: YugoMode;
   battery: number;
   ledColor: string;
@@ -60,7 +72,7 @@ const useYugoStore = create<YugoState>()(
   persist(
     (set, get) => ({
       // Connection defaults
-      bridgeUrl: '',
+      bridgeUrl: DEFAULT_BRIDGE_URL,
       wsConnected: false,
       setBridgeUrl: (url: string) => {
         set({ bridgeUrl: url });
@@ -74,6 +86,7 @@ const useYugoStore = create<YugoState>()(
 
       // Yugo defaults
       mood: 'idle',
+      moodColor: '',
       mode: 'creature',
       battery: 100,
       ledColor: '#94A3B8',
@@ -110,7 +123,14 @@ const useYugoStore = create<YugoState>()(
         const wsUrl = `${bridgeUrl.replace(/^http/, 'ws')}/ws/state`;
         let ws: WebSocket;
         try {
-          ws = new WebSocket(wsUrl);
+          // RN's WebSocket accepts a 3rd options arg with headers (DOM lib doesn't
+          // type it), needed to clear ngrok's interstitial on the upgrade handshake.
+          const RNWebSocket = WebSocket as unknown as new (
+            url: string,
+            protocols?: string[] | null,
+            options?: { headers?: Record<string, string> }
+          ) => WebSocket;
+          ws = new RNWebSocket(wsUrl, [], { headers: BRIDGE_HEADERS });
         } catch (e) {
           console.warn('[YugoWS] Failed to create WebSocket:', e);
           return;
@@ -172,13 +192,24 @@ const useYugoStore = create<YugoState>()(
         if (!data || typeof data !== 'object') return;
         const d = data as Record<string, unknown>;
         const updates: Partial<YugoState> = {};
-        if (typeof d.mood === 'string' && ['calm', 'nervous', 'excited', 'meditation', 'idle'].includes(d.mood)) {
+        // mood: the body sends an object {scalar, label, color}; tolerate a bare
+        // string too. Use `color` for the orb tint, map `label` to a YugoMood.
+        if (d.mood && typeof d.mood === 'object') {
+          const m = d.mood as Record<string, unknown>;
+          if (typeof m.color === 'string') updates.moodColor = m.color;
+          if (typeof m.label === 'string' && m.label in MOOD_COLORS) {
+            updates.mood = m.label as YugoMood;
+          }
+        } else if (typeof d.mood === 'string' && d.mood in MOOD_COLORS) {
           updates.mood = d.mood as YugoMood;
         }
         if (typeof d.mode === 'string' && ['creature', 'wand', 'personal', 'find', 'friend', 'meditation'].includes(d.mode)) {
           updates.mode = d.mode as YugoMode;
         }
-        if (typeof d.battery === 'number') updates.battery = d.battery;
+        // battery: the body reports a 0..1 fraction; the UI shows a percent.
+        if (typeof d.battery === 'number') {
+          updates.battery = d.battery <= 1 ? Math.round(d.battery * 100) : Math.round(d.battery);
+        }
         if (typeof d.led_color === 'string') updates.ledColor = d.led_color;
         if (typeof d.ledColor === 'string') updates.ledColor = d.ledColor;
         if (typeof d.person_count === 'number') updates.personCount = d.person_count;
@@ -207,8 +238,11 @@ const useYugoStore = create<YugoState>()(
 
 export default useYugoStore;
 
-// Convenience hook: returns mood color + pulse duration
+// Convenience hook: returns mood color + pulse duration. Prefers the hex the
+// body sends in its mood frame, falling back to the local MOOD_COLORS table.
 export function useMoodColor(): { color: string; pulseDuration: number } {
   const mood = useYugoStore((s) => s.mood);
-  return MOOD_COLORS[mood] ?? MOOD_COLORS.idle;
+  const moodColor = useYugoStore((s) => s.moodColor);
+  const base = MOOD_COLORS[mood] ?? MOOD_COLORS.idle;
+  return { color: moodColor || base.color, pulseDuration: base.pulseDuration };
 }
