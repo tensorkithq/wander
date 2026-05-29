@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { View, Text, Pressable, Dimensions } from 'react-native';
+import { View, Text, Pressable, Dimensions, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -25,6 +25,16 @@ import {
 import MoodBackground from '@/components/MoodBackground';
 import { StopGlyph } from '@/components/Glyph';
 import { font } from '@/lib/typography';
+import {
+  type LucideIcon,
+  Hand,
+  Armchair,
+  MoveVertical,
+  Heart,
+  Music,
+  PersonStanding,
+  ChevronsDown,
+} from 'lucide-react-native';
 
 const { width: SW } = Dimensions.get('window');
 const PAD_SIZE = Math.min(SW * 0.5, 220);
@@ -36,21 +46,18 @@ const JOYSTICK_TICK_MS = 66;
 // D-pad re-fires the same nudge every 250 ms while held (~4 Hz).
 // const DPAD_TICK_MS = 250; // D-pad disabled
 
-type DedicatedTrickId = 'hello' | 'sit' | 'stretch' | 'heart';
-type GenericTrickId = 'WiggleHips' | 'Dance' | 'StandUp' | 'StandDown';
+type TrickKind = 'dedicated' | 'generic';
+// dedicated ids hit purpose-built routes; generic ids are SPORT_CMD names for /trick/{name}.
+type TrickItem = { id: string; label: string; kind: TrickKind; Icon: LucideIcon };
 
-const DEDICATED_TRICKS: { id: DedicatedTrickId; label: string; emoji: string }[] = [
-  { id: 'hello', label: 'Hello', emoji: '👋' },
-  { id: 'sit', label: 'Sit', emoji: '🪑' },
-  { id: 'stretch', label: 'Stretch', emoji: '🤸' },
-  { id: 'heart', label: 'Heart', emoji: '🤞' },
-];
-
-const GENERIC_TRICKS: { id: GenericTrickId; label: string; emoji: string }[] = [
-  { id: 'WiggleHips', label: 'Wiggle', emoji: '💃' },
-  { id: 'Dance', label: 'Dance', emoji: '🕺' },
-  { id: 'StandUp', label: 'Stand', emoji: '🧍' },
-  { id: 'StandDown', label: 'Down', emoji: '🐕' },
+const TRICKS: TrickItem[] = [
+  { id: 'hello', label: 'Hello', kind: 'dedicated', Icon: Hand },
+  { id: 'sit', label: 'Sit', kind: 'dedicated', Icon: Armchair },
+  { id: 'stretch', label: 'Stretch', kind: 'dedicated', Icon: MoveVertical },
+  { id: 'heart', label: 'Heart', kind: 'dedicated', Icon: Heart },
+  { id: 'Dance', label: 'Dance', kind: 'generic', Icon: Music },
+  { id: 'StandUp', label: 'Stand', kind: 'generic', Icon: PersonStanding },
+  { id: 'StandDown', label: 'Down', kind: 'generic', Icon: ChevronsDown },
 ];
 
 export default function ControllerScreen() {
@@ -155,19 +162,18 @@ export default function ControllerScreen() {
   // }, []);
 
   // --- Tricks --------------------------------------------------------------
-  const handleDedicated = async (id: DedicatedTrickId) => {
+  const handleTrick = async (t: TrickItem) => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    switch (id) {
-      case 'hello': return sayHello();
-      case 'sit': return sit();
-      case 'stretch': return stretch();
-      case 'heart': return heart();
+    if (t.kind === 'dedicated') {
+      switch (t.id) {
+        case 'hello': return sayHello();
+        case 'sit': return sit();
+        case 'stretch': return stretch();
+        case 'heart': return heart();
+      }
+    } else {
+      await trick(t.id);
     }
-  };
-
-  const handleGeneric = async (id: GenericTrickId) => {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await trick(id);
   };
 
   const handleStop = async () => {
@@ -331,57 +337,50 @@ export default function ControllerScreen() {
           </View>
         </View>
 
-        {/* Trick buttons — dedicated row */}
-        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-          <Text style={{ fontFamily: font.bold, color: '#FFFFFF44', fontSize: 10, letterSpacing: 2, marginBottom: 8 }}>
+        {/* Trick carousel */}
+        <View style={{ paddingBottom: 8 }}>
+          <Text style={{ fontFamily: font.bold, color: '#FFFFFF44', fontSize: 10, letterSpacing: 2, marginBottom: 8, marginLeft: 16 }}>
             TRICKS
           </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-            {DEDICATED_TRICKS.map((t) => (
-              <Pressable
-                key={t.id}
-                onPress={() => handleDedicated(t.id)}
-                testID={`trick-${t.id}`}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  aspectRatio: 1,
-                  backgroundColor: pressed ? `${moodColor}22` : '#FFFFFF0A',
-                  borderWidth: 1,
-                  borderColor: `${moodColor}44`,
-                  borderRadius: 16,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                })}
-              >
-                <Text style={{ fontSize: 22 }}>{t.emoji}</Text>
-                <Text style={{ fontFamily: font.semibold, color: moodColor, fontSize: 10, letterSpacing: 0.5 }}>{t.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {GENERIC_TRICKS.map((t) => (
-              <Pressable
-                key={t.id}
-                onPress={() => handleGeneric(t.id)}
-                testID={`trick-${t.id.toLowerCase()}`}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  aspectRatio: 1.2,
-                  backgroundColor: pressed ? `${moodColor}1A` : '#FFFFFF06',
-                  borderWidth: 1,
-                  borderColor: '#FFFFFF15',
-                  borderRadius: 14,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 2,
-                })}
-              >
-                <Text style={{ fontSize: 18 }}>{t.emoji}</Text>
-                <Text style={{ fontFamily: font.regular, color: '#FFFFFF88', fontSize: 9, letterSpacing: 0.5 }}>{t.label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flexGrow: 0 }}
+            contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}
+          >
+            {TRICKS.map((t) => {
+              const Icon = t.Icon;
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() => handleTrick(t)}
+                  testID={`trick-${t.id.toLowerCase()}`}
+                  style={({ pressed }) => ({
+                    width: 92,
+                    height: 108,
+                    borderRadius: 16,
+                    backgroundColor: pressed ? `${moodColor}1A` : '#FFFFFF0A',
+                    borderWidth: 1,
+                    borderColor: `${moodColor}55`,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 10,
+                    transform: [{ scale: pressed ? 0.96 : 1 }],
+                    shadowColor: moodColor,
+                    shadowOpacity: 0.25,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 0 },
+                    elevation: 4,
+                  })}
+                >
+                  <Icon size={26} color={moodColor} />
+                  <Text style={{ fontFamily: font.semibold, color: '#FFFFFFCC', fontSize: 11, letterSpacing: 0.5 }}>
+                    {t.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
       </SafeAreaView>
     </MoodBackground>
