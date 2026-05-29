@@ -65,10 +65,11 @@ def trick(name: str, conn=Depends(get_robot), motion=Depends(get_motion)):
 
 @router.post("/sleep", response_model=TrickResult)
 def sleep(conn=Depends(get_robot), motion=Depends(get_motion)):
-    """Park Yugo: lie down then go limp (StandDown → Damp) — the safe 'sleep' state.
+    """Park Yugo safely: RecoveryStand → StandDown → Damp (the 'sleep' state).
 
-    Distinct from /stop (instant halt, stays standing). The next nav nudge will
-    auto-RecoveryStand back into a walk gait.
+    Stands to a stable stance first (so an active robot doesn't collapse), then
+    lies down and goes limp. Distinct from /stop (instant halt, stays standing).
+    The next nav nudge will auto-RecoveryStand back into a walk gait.
     """
     motion.suspend()  # mute the velocity loop so it can't clobber the sequence
     return RobotController.sleep(conn)

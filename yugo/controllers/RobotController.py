@@ -65,10 +65,16 @@ def stop(conn) -> dict:
 
 
 def sleep(conn) -> dict:
-    """Park Yugo: lie down then go limp — the safe 'sleep' state (StandDown → Damp).
+    """Park Yugo safely: RecoveryStand → StandDown → Damp.
 
-    A short settle lets StandDown finish so Damp relaxes from lying, not standing.
+    RecoveryStand FIRST so an active / odd-posture robot recovers to a known
+    stable upright stance before it descends; then StandDown (controlled lie-down)
+    → Damp (motors go limp). A settle between steps lets each finish before the
+    next, so it never collapses from standing.
     """
+    settle = settings.motion.trick_balance_settle_s
+    fire(conn, "RecoveryStand")
+    time.sleep(settle)
     fire(conn, "StandDown")
-    time.sleep(settings.motion.trick_balance_settle_s)
+    time.sleep(settle)
     return fire(conn, "Damp")
