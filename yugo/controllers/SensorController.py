@@ -1,19 +1,32 @@
 """The wand hash engine + spell firing.
 
-A phone magnetometer trace is turned into a robot trick DETERMINISTICALLY:
+A gesture trace is turned into a robot trick DETERMINISTICALLY:
 normalize -> feature-extract -> stable hash -> bucket -> fixed trick table.
+
+ONE engine, TWO client channels (the wand runs on both iOS phone and watchOS):
+  - PHONE — a magnetometer trace (`spell_for_trace`). The original engine,
+    namespaced "v{SPELL_VERSION}"; kept byte-for-byte so phone spells never
+    remap. The watch has no usable raw magnetometer, hence the second channel.
+  - WATCH — a device-motion trace (`spell_for_motion`): user-acceleration
+    (path) is primary, rotation-rate (twist) the optional secondary; their
+    features are concatenated then hashed under a separate "m{MOTION_SPELL_VERSION}"
+    namespace so the two channels can version independently and never collide.
 
 Body-only, pure math: no AI, no clock, no randomness, no network. The same
 trace ALWAYS yields the same bucket/move, across processes and restarts — which
 is why the hash is `hashlib.sha256` over quantized integer features, NEVER
-Python's salted builtin `hash()`.
+Python's salted builtin `hash()`. The shared normalize/feature pipeline makes
+both channels rotation/scale/drift-robust, so units (µT vs g vs rad/s) don't
+matter — only gesture shape does.
 
 See PRD `prd/module-wand-hash.md` and `prd/02-yugo-app.md` §3.
 """
 
 from __future__ import annotations
 
+import enum
 import hashlib
+import threading
 from typing import List, Optional, Sequence
 
 from unitree_webrtc_connect.constants import SPORT_CMD
@@ -22,7 +35,8 @@ from yugo.controllers import RobotController
 
 # --- Versioned, FIXED constants. Changing ANY of these changes every spell. ---
 
-SPELL_VERSION = 1
+SPELL_VERSION = 1  # phone magnetometer engine — FROZEN; bumping remaps every phone spell.
+MOTION_SPELL_VERSION = 1  # watch device-motion engine (accel + gyro); versions independently.
 RESAMPLE_N = 64  # fixed trace length after time-uniform resampling
 SCALE_EPS = 1e-6  # guard against divide-by-zero on a still trace
 
@@ -151,34 +165,113 @@ def _features(norm: List[List[float]]) -> List[int]:
     return feats
 
 
-def _stable_bucket(feats: Sequence[int]) -> int:
+def _stable_bucket(feats: Sequence[int], tag: str) -> int:
     """Hash quantized features to a stable bucket with sha256 (NOT builtin
-    hash(), which is salted per-process). Deterministic across restarts."""
-    payload = f"v{SPELL_VERSION}:" + ",".join(str(int(f)) for f in feats)
+    hash(), which is salted per-process). `tag` namespaces the engine + version
+    (e.g. "v1" magnetometer, "m1" motion) so the two channels never collide and
+    each can version independently. Deterministic across restarts."""
+    payload = f"{tag}:" + ",".join(str(int(f)) for f in feats)
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") % BUCKET_COUNT
 
 
-# --- Public engine -----------------------------------------------------------
-
-def spell_for_trace(
-    magnetometer: Sequence[Sequence[float]],
-    accel: Optional[Sequence[Sequence[float]]] = None,
-) -> dict:
-    """Pure: trace -> {"bucket", "move", "api_id"}. No state, no side effects.
-
-    `accel` is accepted for forward-compat but not yet fed into the hash, so the
-    magnetometer trace alone fully determines the spell (kept simple + stable).
-    """
-    norm = _normalize(magnetometer)
-    bucket = _stable_bucket(_features(norm))
+def _bucket_to_move(bucket: int) -> dict:
     move = TRICK_TABLE[bucket]
     return {"bucket": bucket, "move": move, "api_id": SPORT_CMD[move]}
 
 
+# --- Public engine -----------------------------------------------------------
+
+def spell_for_trace(magnetometer: Sequence[Sequence[float]]) -> dict:
+    """Pure: a PHONE magnetometer trace -> {"bucket", "move", "api_id"}.
+
+    The original engine, hashed under "v{SPELL_VERSION}". Kept byte-for-byte so
+    existing phone spells never remap. No state, no side effects.
+    """
+    feats = _features(_normalize(magnetometer))
+    return _bucket_to_move(_stable_bucket(feats, f"v{SPELL_VERSION}"))
+
+
+def spell_for_motion(
+    accel: Sequence[Sequence[float]],
+    gyro: Optional[Sequence[Sequence[float]]] = None,
+) -> dict:
+    """Pure: a WATCH device-motion trace -> {"bucket", "move", "api_id"}.
+
+    `accel` (the gesture's path) is the primary channel; `gyro` (its twist) the
+    optional secondary. Per-channel features are concatenated and hashed under
+    "m{MOTION_SPELL_VERSION}" — a separate namespace from the magnetometer
+    engine, so the two never collide. No state, no side effects.
+    """
+    feats: List[int] = list(_features(_normalize(accel)))
+    if gyro:
+        feats += _features(_normalize(gyro))
+    return _bucket_to_move(_stable_bucket(feats, f"m{MOTION_SPELL_VERSION}"))
+
+
+# --- Single-flight state machine ---------------------------------------------
+
+
+class SensorPhase(str, enum.Enum):
+    IDLE = "idle"
+    CASTING = "casting"
+
+
+class _SensorMachine:
+    """Single-flight gate for the wand sensor namespace.
+
+    A spell cast holds the machine in CASTING for the WHOLE duration of its
+    execution (the BalanceStand settle + SPORT_MOD publish, ~1.5s+). While
+    CASTING, every other sensor request — a second spell OR an ambient /sensor
+    reading — is DROPPED ("piped to null") instead of queued, so a flood of wand
+    posts can't stack casts up behind the settle and make the dog twitch through
+    a backlog. Thread-safe by design: FastAPI runs these sync endpoints in a
+    threadpool, so concurrent posts land on different threads and race here.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._phase = SensorPhase.IDLE
+
+    @property
+    def phase(self) -> SensorPhase:
+        with self._lock:
+            return self._phase
+
+    @property
+    def busy(self) -> bool:
+        return self.phase is SensorPhase.CASTING
+
+    def begin_cast(self) -> bool:
+        """Atomically claim the cast slot. True = won it (caller MUST end_cast in
+        a finally); False = a cast is already in flight, so drop this request."""
+        with self._lock:
+            if self._phase is SensorPhase.CASTING:
+                return False
+            self._phase = SensorPhase.CASTING
+            return True
+
+    def end_cast(self) -> None:
+        with self._lock:
+            self._phase = SensorPhase.IDLE
+
+
+# Process-wide singleton: the wand is one physical robot, so one cast at a time.
+machine = _SensorMachine()
+
+
 def fire_spell(conn, trace) -> dict:
-    """Compute the match ALWAYS (even offline), then fire the trick over WebRTC
-    only when the link is live. Returns {"matched": {...}, "fired": bool}.
+    """Match ALWAYS (even offline), then fire the trick over WebRTC only when the
+    link is live. Returns {"matched": {...}, "fired": bool, "dropped": bool}.
+
+    Single-flight: the match is cheap and always computed, but the FIRING is
+    gated by `machine` — if a cast is already executing this one is dropped
+    (`dropped:true`, nothing published) rather than queued behind the settle.
+
+    Dispatch by client channel: a magnetometer trace is the phone (original
+    engine, accel ignored as before); otherwise it's the watch's device-motion
+    (accel + gyro). The watch can't supply a raw magnetometer, so its absence is
+    the reliable discriminator and keeps the phone path 100% unchanged.
 
     `conn` may be None (offline) — then `fired` is False and nothing is published.
     Firing reuses RobotController.fire (the single trick path: SPORT_MOD publish
@@ -187,9 +280,18 @@ def fire_spell(conn, trace) -> dict:
     TRICK_TABLE move regardless of posture, and not every such move is listed in
     NEEDS_BALANCE, so this guarantees new spells won't fail from a bad posture.
     """
-    matched = spell_for_trace(trace.magnetometer, trace.accel)
-    fired = False
-    if conn is not None and conn.connection_ready.is_set():
-        RobotController.fire(conn, matched["move"], ensure_balance=True)
-        fired = True
-    return {"matched": matched, "fired": fired}
+    if getattr(trace, "magnetometer", None):
+        matched = spell_for_trace(trace.magnetometer)
+    else:
+        matched = spell_for_motion(trace.accel, getattr(trace, "gyro", None))
+
+    if not machine.begin_cast():
+        return {"matched": matched, "fired": False, "dropped": True}
+    try:
+        fired = False
+        if conn is not None and conn.connection_ready.is_set():
+            RobotController.fire(conn, matched["move"], ensure_balance=True)
+            fired = True
+        return {"matched": matched, "fired": fired, "dropped": False}
+    finally:
+        machine.end_cast()

@@ -142,6 +142,92 @@ def test_spell_too_short_trace_422(spell_client):
     assert r.status_code == 422
 
 
+def test_spell_motion_accel_gyro(spell_client):
+    """The watch path: device-motion (accel + gyro) casts a valid trick, and the
+    gyro channel actually feeds the hash (dropping it can change the bucket)."""
+    accel = [[i * 20, 0.5 * (i % 5), -0.3, 0.2] for i in range(40)]
+    gyro = [[i * 20, 1.0, 0.2 * (i % 7), -0.5] for i in range(40)]
+    both = spell_client.post(
+        "/sensor/spell", json={"source": "watch-wand", "accel": accel, "gyro": gyro}
+    )
+    assert both.status_code == 200
+    assert both.json()["matched"]["move"] in SPORT_CMD
+    # accel-only is still valid but the gyro is mixed in, so it's a distinct hash.
+    accel_only = spell_client.post(
+        "/sensor/spell", json={"source": "watch-wand", "accel": accel}
+    )
+    assert accel_only.status_code == 200
+    assert accel_only.json()["matched"]["bucket"] != both.json()["matched"]["bucket"]
+
+
+def test_spell_motion_missing_channels_422(spell_client):
+    """No accel and no magnetometer -> nothing to hash -> rejected."""
+    r = spell_client.post("/sensor/spell", json={"source": "watch-wand"})
+    assert r.status_code == 422
+
+
+# --- single-flight state machine ---------------------------------------------
+
+def test_sensor_machine_single_flight():
+    m = SensorController.machine
+    assert m.phase is SensorController.SensorPhase.IDLE
+    assert m.begin_cast() is True       # claim the slot
+    assert m.busy is True
+    assert m.begin_cast() is False      # already casting -> caller must drop
+    m.end_cast()
+    assert m.busy is False
+    assert m.begin_cast() is True       # reusable after the cast ends
+    m.end_cast()
+
+
+def test_fire_spell_dropped_while_casting():
+    """A cast that arrives mid-cast is piped to null: dropped, never fired, but
+    the match is still computed."""
+    m = SensorController.machine
+    assert m.begin_cast() is True       # simulate an in-flight cast
+    try:
+        class _T:
+            magnetometer = _sweep()
+            accel = None
+            gyro = None
+        out = SensorController.fire_spell(None, _T())
+        assert out["dropped"] is True
+        assert out["fired"] is False
+        assert out["matched"]["move"] in SPORT_CMD
+    finally:
+        m.end_cast()
+
+
+def test_spell_http_dropped_while_casting(spell_client):
+    """Over HTTP: /sensor/spell returns dropped:true while a cast is in flight."""
+    m = SensorController.machine
+    assert m.begin_cast() is True
+    try:
+        r = spell_client.post(
+            "/sensor/spell", json={"source": "phone-wand", "magnetometer": _circle()}
+        )
+        assert r.status_code == 200
+        j = r.json()
+        assert j["dropped"] is True and j["fired"] is False
+    finally:
+        m.end_cast()
+
+
+def test_sensor_ambient_dropped_while_casting(spell_client):
+    """Ambient /sensor is piped to null while a spell is mid-cast, then resumes."""
+    m = SensorController.machine
+    assert m.begin_cast() is True
+    try:
+        r = spell_client.post(
+            "/sensor", json={"source": "watch-wand", "magnetometer": {"x": 1, "y": 2, "z": 3}}
+        )
+        assert r.status_code == 200 and r.json()["dropped"] is True
+    finally:
+        m.end_cast()
+    after = spell_client.post("/sensor", json={"source": "watch-wand"})
+    assert after.status_code == 200 and after.json()["dropped"] is False
+
+
 def test_sensor_valid_200(spell_client):
     body = {
         "source": "phone-wand",
