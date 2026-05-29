@@ -1,0 +1,7 @@
+# Xcode user/build artifacts — the project itself (wander.xcodeproj) IS tracked.
+*.xcuserstate
+xcuserdata/
+**/xcuserdata/
+DerivedData/
+build/
+.DS_Store
