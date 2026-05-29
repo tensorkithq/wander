@@ -59,13 +59,23 @@ function patchFetch(g: Record<string, unknown>): void {
   g.fetch = patched;
 }
 
+// Metro/Expo/Hermes dev sockets (HMR, inspector, log shipping). Instrumenting
+// these would feed back on itself: a log emitted here is shipped to Metro over
+// the /hot socket, which is another send(), which logs again → infinite loop.
+const DEV_WS =
+  /\/(hot|message|inspector|debugger-proxy|launch-js-devtools|symbolicate|events|logs)(\/|$|\?)/;
+
+function isDevSocket(url: string): boolean {
+  return typeof url === 'string' && DEV_WS.test(url);
+}
+
 function patchWebSocket(g: Record<string, unknown>): void {
   const OrigWS = g.WebSocket as (typeof WebSocket) | undefined;
   if (typeof OrigWS !== 'function') return;
 
   function PatchedWebSocket(url: string, protocols?: string | string[]) {
     const ws = new OrigWS!(url, protocols);
-    if (isNetworkDebug()) {
+    if (isNetworkDebug() && !isDevSocket(url)) {
       try {
         ws.addEventListener?.('open', () => logWs('open', url));
         ws.addEventListener?.('close', (e: any) => logWs('close', url, e?.code));

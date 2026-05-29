@@ -23,6 +23,19 @@ export function setNetworkDebug(on: boolean): void {
   enabled = on;
 }
 
+// Reentrancy guard: console output is itself shipped to Metro over a socket, so
+// a log emitted while logging must not trigger another log (infinite loop).
+let emitting = false;
+function emit(...args: unknown[]): void {
+  if (emitting) return;
+  emitting = true;
+  try {
+    console.log(...args);
+  } finally {
+    emitting = false;
+  }
+}
+
 const MAX_BODY = 2000;
 
 // Headers that carry credentials — never print their values.
@@ -80,27 +93,27 @@ export function logRequest(
   const b = previewBody(body);
   if (h) meta.headers = h;
   if (b !== undefined) meta.body = b;
-  if (Object.keys(meta).length) console.log(`[net] → ${method} ${url}`, meta);
-  else console.log(`[net] → ${method} ${url}`);
+  if (Object.keys(meta).length) emit(`[net] → ${method} ${url}`, meta);
+  else emit(`[net] → ${method} ${url}`);
 }
 
 export function logResponse(method: string, url: string, status: number, ms: number): void {
   if (!enabled) return;
-  console.log(`[net] ← ${status} ${method} ${url} (${ms}ms)`);
+  emit(`[net] ← ${status} ${method} ${url} (${ms}ms)`);
 }
 
 export function logError(method: string, url: string, err: unknown, ms: number): void {
   if (!enabled) return;
-  console.log(`[net] ✕ ${method} ${url} (${ms}ms)`, err);
+  emit(`[net] ✕ ${method} ${url} (${ms}ms)`, err);
 }
 
 export function logWs(event: string, url: string, detail?: unknown): void {
   if (!enabled) return;
-  if (detail !== undefined) console.log(`[net] ws ${event} ${url}`, detail);
-  else console.log(`[net] ws ${event} ${url}`);
+  if (detail !== undefined) emit(`[net] ws ${event} ${url}`, detail);
+  else emit(`[net] ws ${event} ${url}`);
 }
 
 export function logWsSend(url: string, data: unknown): void {
   if (!enabled) return;
-  console.log(`[net] ws → ${url}`, previewBody(data));
+  emit(`[net] ws → ${url}`, previewBody(data));
 }
