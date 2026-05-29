@@ -1,5 +1,7 @@
 import { fetch } from "expo/fetch";
 
+import { isNetworkDebug, logError, logRequest, logResponse } from "@/lib/debug";
+
 // Response envelope type - all app routes return { data: T }
 interface ApiResponse<T> {
   data: T;
@@ -11,10 +13,22 @@ const request = async <T>(
   url: string,
   options: { method?: string; body?: string } = {}
 ): Promise<T> => {
-  const response = await fetch(`${baseUrl}${url}`, {
-    ...options,
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
-  });
+  // expo/fetch bypasses the global fetch patch, so log it here directly.
+  const method = options.method ?? "GET";
+  const fullUrl = `${baseUrl}${url}`;
+  const headers = options.body ? { "Content-Type": "application/json" } : undefined;
+  const debug = isNetworkDebug();
+  const start = debug ? Date.now() : 0;
+  if (debug) logRequest(method, fullUrl, headers, options.body);
+
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(fullUrl, { ...options, headers });
+  } catch (e) {
+    if (debug) logError(method, fullUrl, e, Date.now() - start);
+    throw e;
+  }
+  if (debug) logResponse(method, fullUrl, response.status, Date.now() - start);
 
   // 1. Handle 204 No Content
   if (response.status === 204) {
