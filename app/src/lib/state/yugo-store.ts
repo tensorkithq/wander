@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type YugoMood = 'calm' | 'nervous' | 'excited' | 'meditation' | 'idle';
-export type YugoMode = 'creature' | 'ghost' | 'hunt' | 'scanner' | 'music' | 'meditation';
+export type YugoMode = 'creature' | 'wand' | 'personal' | 'find' | 'friend' | 'meditation';
 
 export const MOOD_COLORS: Record<YugoMood, { color: string; pulseDuration: number }> = {
   calm: { color: '#F59E0B', pulseDuration: 4000 },
@@ -28,6 +28,16 @@ interface YugoState {
   fieldIntensity: number;
   isSpeaking: boolean;
   lastUtterance: string;
+
+  // Settings
+  wandInverted: boolean;
+  toggleWandInverted: () => void;
+  navInverted: boolean;
+  toggleNavInverted: () => void;
+
+  // Find-mode target
+  findTarget: string;
+  setFindTarget: (t: string) => void;
 
   // WS management
   wsInstance: WebSocket | null;
@@ -71,6 +81,16 @@ const useYugoStore = create<YugoState>()(
       fieldIntensity: 0,
       isSpeaking: false,
       lastUtterance: '',
+
+      // Settings
+      wandInverted: false,
+      toggleWandInverted: () => set((s) => ({ wandInverted: !s.wandInverted })),
+      navInverted: false,
+      toggleNavInverted: () => set((s) => ({ navInverted: !s.navInverted })),
+
+      // Find-mode target
+      findTarget: '',
+      setFindTarget: (findTarget: string) => set({ findTarget }),
 
       // WS management
       wsInstance: null,
@@ -155,7 +175,7 @@ const useYugoStore = create<YugoState>()(
         if (typeof d.mood === 'string' && ['calm', 'nervous', 'excited', 'meditation', 'idle'].includes(d.mood)) {
           updates.mood = d.mood as YugoMood;
         }
-        if (typeof d.mode === 'string' && ['creature', 'ghost', 'hunt', 'scanner', 'music', 'meditation'].includes(d.mode)) {
+        if (typeof d.mode === 'string' && ['creature', 'wand', 'personal', 'find', 'friend', 'meditation'].includes(d.mode)) {
           updates.mode = d.mode as YugoMode;
         }
         if (typeof d.battery === 'number') updates.battery = d.battery;
@@ -176,7 +196,11 @@ const useYugoStore = create<YugoState>()(
       name: 'yugo-storage',
       storage: createJSONStorage(() => AsyncStorage),
       // Only persist bridgeUrl — everything else is live state
-      partialize: (state) => ({ bridgeUrl: state.bridgeUrl }),
+      partialize: (state) => ({
+        bridgeUrl: state.bridgeUrl,
+        wandInverted: state.wandInverted,
+        navInverted: state.navInverted,
+      }),
     }
   )
 );

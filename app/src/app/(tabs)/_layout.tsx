@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable, Text } from 'react-native';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -18,7 +18,6 @@ import {
   TalkGlyph,
   WandGlyph,
   ZenGlyph,
-  SettingsGlyph,
 } from '@/components/Glyph';
 
 const INACTIVE_COLOR = '#3D3D4F';
@@ -67,7 +66,6 @@ function TabIndicator({ color }: { color: string }) {
 function YugoTabBar({ state, navigation }: { state: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const { color: moodColor } = useMoodColor();
-  const router = useRouter();
 
   return (
     <View
@@ -138,27 +136,6 @@ function YugoTabBar({ state, navigation }: { state: any; navigation: any }) {
           );
         })}
 
-        {/* Settings */}
-        <Pressable
-          onPress={() => router.push('/settings' as never)}
-          style={{ width: 50, alignItems: 'center', paddingVertical: 4 }}
-          testID="tab-settings"
-        >
-          <SettingsGlyph size={22} color={INACTIVE_COLOR} />
-          <View style={{ height: 1.5, marginTop: 4 }} />
-          <Text
-            style={{
-              fontFamily: font.regular,
-              color: INACTIVE_COLOR,
-              fontSize: 9,
-              letterSpacing: 1.5,
-              marginTop: 4,
-              opacity: 0.55,
-            }}
-          >
-            CFG
-          </Text>
-        </Pressable>
       </View>
     </View>
   );

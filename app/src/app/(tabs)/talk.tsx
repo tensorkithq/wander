@@ -6,6 +6,8 @@ import {
   ScrollView,
   Platform,
   ActivityIndicator,
+  TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -21,7 +23,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import useYugoStore, { useMoodColor } from '@/lib/state/yugo-store';
 import { agentSay } from '@/lib/api/yugo-api';
-import { getDeepgramKey, getElevenLabsKey, getVoiceId } from '@/lib/api-keys';
+import { getElevenLabsKey, getVoiceId } from '@/lib/api-keys';
 import MoodBackground from '@/components/MoodBackground';
 import YugoOrb from '@/components/YugoOrb';
 import { TalkGlyph, AlertGlyph } from '@/components/Glyph';
@@ -33,28 +35,31 @@ interface ChatMessage {
   text: string;
 }
 
-async function transcribeWithDeeepgram(uri: string, key: string): Promise<string> {
-  const response = await fetch(
-    'https://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${key}`,
-        'Content-Type': 'audio/m4a',
-      },
-      body: await fetch(uri).then((r) => r.blob()),
-    }
-  );
+async function transcribeWithOpenbeam(uri: string): Promise<string> {
+  const form = new FormData();
+  // React Native FormData accepts { uri, name, type }
+  form.append('audio', {
+    uri,
+    name: 'recording.m4a',
+    type: 'audio/m4a',
+  } as unknown as Blob);
+
+  const response = await fetch('https://openbeam.tensorkit.net/infer/stt/whisper', {
+    method: 'POST',
+    body: form,
+  });
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Deepgram error ${response.status}: ${err}`);
+    throw new Error(`Transcription error ${response.status}: ${err}`);
   }
 
   const data = await response.json() as {
-    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+    transcript?: string;
+    text?: string;
+    results?: { transcript?: string };
   };
-  return data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
+  return data?.transcript ?? data?.text ?? data?.results?.transcript ?? '';
 }
 
 async function speakWithElevenLabs(text: string, key: string, voiceId: string): Promise<string> {
@@ -105,6 +110,8 @@ export default function TalkScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [textDraft, setTextDraft] = useState('');
+  const [isSendingText, setIsSendingText] = useState(false);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -166,6 +173,27 @@ export default function TalkScreen() {
     }
   };
 
+  const sendText = async () => {
+    const t = textDraft.trim();
+    if (!t || isSendingText) return;
+    Keyboard.dismiss();
+    setErrorMsg(null);
+    setTextDraft('');
+    setIsSendingText(true);
+    addMessage('user', t);
+    try {
+      const { reply } = await agentSay(t);
+      const replyText = reply || 'Yugo looks at you thoughtfully…';
+      addMessage('yugo', replyText);
+      setLastUtterance(replyText);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Send failed';
+      setErrorMsg(msg);
+    } finally {
+      setIsSendingText(false);
+    }
+  };
+
   const stopRecordingAndProcess = async () => {
     if (!recordingRef.current) return;
     setIsRecording(false);
@@ -180,14 +208,7 @@ export default function TalkScreen() {
 
       if (!uri) throw new Error('No audio URI');
 
-      const dgKey = await getDeepgramKey();
-      if (!dgKey) {
-        setErrorMsg('Deepgram API key not configured. Add it in Settings.');
-        setIsProcessing(false);
-        return;
-      }
-
-      const transcript = await transcribeWithDeeepgram(uri, dgKey);
+      const transcript = await transcribeWithOpenbeam(uri);
       if (!transcript.trim()) {
         setIsProcessing(false);
         return;
@@ -322,7 +343,7 @@ export default function TalkScreen() {
         ) : null}
 
         {/* PTT button */}
-        <View style={{ alignItems: 'center', paddingBottom: 16, paddingTop: 8 }}>
+        <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 12 }}>
           {isProcessing ? (
             <View style={{
               width: 80,
@@ -367,6 +388,65 @@ export default function TalkScreen() {
           <Text style={{ fontFamily: font.semibold, color: '#FFFFFF44', fontSize: 11, marginTop: 10, letterSpacing: 3 }}>
             {isProcessing ? 'THINKING…' : isRecording ? 'LISTENING…' : 'HOLD TO SPEAK'}
           </Text>
+        </View>
+
+        {/* Text fallback */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            marginHorizontal: 16,
+            marginBottom: 16,
+            backgroundColor: '#FFFFFF08',
+            borderWidth: 1,
+            borderColor: '#FFFFFF15',
+            borderRadius: 14,
+            paddingHorizontal: 12,
+          }}
+        >
+          <TextInput
+            testID="talk-text-input"
+            value={textDraft}
+            onChangeText={setTextDraft}
+            onSubmitEditing={sendText}
+            placeholder="Type to Yugo…"
+            placeholderTextColor="#FFFFFF33"
+            returnKeyType="send"
+            editable={!isSendingText}
+            style={{
+              flex: 1,
+              fontFamily: font.regular,
+              color: '#FFFFFF',
+              fontSize: 14,
+              paddingVertical: 10,
+            }}
+          />
+          <Pressable
+            onPress={sendText}
+            disabled={!textDraft.trim() || isSendingText}
+            testID="talk-text-send"
+            style={({ pressed }) => ({
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 10,
+              backgroundColor: textDraft.trim() ? `${moodColor}33` : '#FFFFFF0A',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            {isSendingText ? (
+              <ActivityIndicator size="small" color={moodColor} />
+            ) : (
+              <Text style={{
+                fontFamily: font.bold,
+                color: textDraft.trim() ? moodColor : '#FFFFFF44',
+                fontSize: 11,
+                letterSpacing: 1.5,
+              }}>
+                SEND
+              </Text>
+            )}
+          </Pressable>
         </View>
       </SafeAreaView>
     </MoodBackground>

@@ -5,15 +5,30 @@ import {
   Image,
   Animated as RNAnimated,
   Dimensions,
+  Pressable,
+  TextInput,
+  Keyboard,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import useYugoStore, { useMoodColor, MOOD_COLORS } from '@/lib/state/yugo-store';
+import type { YugoMode } from '@/lib/state/yugo-store';
+import { setMode } from '@/lib/api/yugo-api';
 import YugoOrb from '@/components/YugoOrb';
 import MoodBackground from '@/components/MoodBackground';
 import WSStatus from '@/components/WSStatus';
 import { BatteryGlyph, PersonGlyph } from '@/components/Glyph';
 import { font } from '@/lib/typography';
+
+const MODES: { id: YugoMode; label: string }[] = [
+  { id: 'creature', label: 'Creature' },
+  { id: 'wand', label: 'Wand' },
+  { id: 'personal', label: 'Personal' },
+  { id: 'find', label: 'Find' },
+  { id: 'friend', label: 'Friend' },
+];
 
 const { width: SW } = Dimensions.get('window');
 
@@ -47,8 +62,32 @@ export default function PortholeScreen() {
   const fieldIntensity = useYugoStore((s) => s.fieldIntensity);
   const isSpeaking = useYugoStore((s) => s.isSpeaking);
   const lastUtterance = useYugoStore((s) => s.lastUtterance);
+  const findTarget = useYugoStore((s) => s.findTarget);
+  const setFindTarget = useYugoStore((s) => s.setFindTarget);
 
   const { color: moodColor } = useMoodColor();
+
+  const [pendingTarget, setPendingTarget] = useState(findTarget);
+
+  const handleMode = async (m: YugoMode) => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (m === 'find') {
+      useYugoStore.getState().setMode(m);
+      if (findTarget) await setMode('find', findTarget);
+      return;
+    }
+    await setMode(m);
+    useYugoStore.getState().setMode(m);
+  };
+
+  const submitFindTarget = async () => {
+    const t = pendingTarget.trim();
+    if (!t) return;
+    Keyboard.dismiss();
+    setFindTarget(t);
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await setMode('find', t);
+  };
 
   // Camera refresh key (MJPEG polling)
   const [camKey, setCamKey] = useState(0);
@@ -111,6 +150,102 @@ export default function PortholeScreen() {
             <BatteryIcon level={battery} />
             <WSStatus />
           </View>
+        </View>
+
+        {/* Mode selector */}
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingRight: 16 }}
+            style={{ flexGrow: 0 }}
+          >
+            {MODES.map((m) => {
+              const active = mode === m.id;
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => handleMode(m.id)}
+                  testID={`mode-${m.id}`}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: active ? `${moodColor}33` : '#FFFFFF0A',
+                    borderWidth: 1,
+                    borderColor: active ? moodColor : '#FFFFFF15',
+                  }}
+                >
+                  <Text style={{
+                    fontFamily: active ? font.semibold : font.regular,
+                    color: active ? moodColor : '#FFFFFF66',
+                    fontSize: 12,
+                    letterSpacing: 0.5,
+                  }}>
+                    {m.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {mode === 'find' ? (
+            <View
+              style={{
+                marginTop: 10,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: '#FFFFFF08',
+                borderWidth: 1,
+                borderColor: `${moodColor}55`,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+              }}
+            >
+              <Text style={{ fontFamily: font.bold, color: moodColor, fontSize: 10, letterSpacing: 2 }}>
+                FIND
+              </Text>
+              <TextInput
+                testID="find-target-input"
+                value={pendingTarget}
+                onChangeText={setPendingTarget}
+                onSubmitEditing={submitFindTarget}
+                placeholder="who? (e.g. Sarah)"
+                placeholderTextColor="#FFFFFF33"
+                returnKeyType="search"
+                autoCapitalize="words"
+                style={{
+                  flex: 1,
+                  fontFamily: font.regular,
+                  color: '#FFFFFF',
+                  fontSize: 14,
+                  paddingVertical: 10,
+                }}
+              />
+              <Pressable
+                onPress={submitFindTarget}
+                disabled={!pendingTarget.trim()}
+                testID="find-target-submit"
+                style={({ pressed }) => ({
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 10,
+                  backgroundColor: pendingTarget.trim() ? `${moodColor}33` : '#FFFFFF0A',
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Text style={{
+                  fontFamily: font.bold,
+                  color: pendingTarget.trim() ? moodColor : '#FFFFFF44',
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                }}>
+                  GO
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         {/* Camera + Orb area */}
