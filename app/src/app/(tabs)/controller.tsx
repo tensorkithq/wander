@@ -80,6 +80,10 @@ export default function ControllerScreen() {
     };
   }, []);
 
+  const activate = useCallback(() => {
+    isActiveRef.current = true;
+  }, []);
+
   const deactivate = useCallback(() => {
     isActiveRef.current = false;
     velRef.current = { vx: 0, vy: 0, wz: 0 };
@@ -99,7 +103,7 @@ export default function ControllerScreen() {
 
   const panGesture = Gesture.Pan()
     .onBegin(() => {
-      runOnJS(() => { isActiveRef.current = true; })();
+      runOnJS(activate)();
     })
     .onUpdate((e) => {
       const dx = Math.min(Math.max(e.translationX, -MAX_OFFSET), MAX_OFFSET);
@@ -183,7 +187,7 @@ export default function ControllerScreen() {
 
   return (
     <MoodBackground>
-      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         {/* Header */}
         <View style={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
           <Text style={{ fontFamily: font.bold, color: '#FFFFFF', fontSize: 11, letterSpacing: 3, opacity: 0.5 }}>
