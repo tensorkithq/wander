@@ -55,7 +55,7 @@ const TRICKS: TrickItem[] = [
   { id: 'sit', label: 'Sit', kind: 'dedicated', Icon: Armchair },
   { id: 'stretch', label: 'Stretch', kind: 'dedicated', Icon: MoveVertical },
   { id: 'heart', label: 'Heart', kind: 'dedicated', Icon: Heart },
-  { id: 'Dance', label: 'Dance', kind: 'generic', Icon: Music },
+  { id: 'Dance1', label: 'Dance', kind: 'generic', Icon: Music },
   { id: 'StandUp', label: 'Stand', kind: 'generic', Icon: PersonStanding },
   { id: 'StandDown', label: 'Down', kind: 'generic', Icon: ChevronsDown },
 ];
@@ -346,7 +346,7 @@ export default function ControllerScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             style={{ flexGrow: 0 }}
-            contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}
+            contentContainerStyle={{ gap: 20, paddingHorizontal: 16, paddingVertical: 4 }}
           >
             {TRICKS.map((t) => {
               const Icon = t.Icon;
