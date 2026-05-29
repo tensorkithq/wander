@@ -20,6 +20,17 @@ class TrickResult(BaseModel):
     api_id: Optional[int] = None
 
 
+class RobotIdentity(BaseModel):
+    """Identity of the connected robot, keyed by its known IP."""
+
+    source: str = "LAN"
+    name: Optional[str] = None
+    ip: str
+    mac: Optional[str] = None
+    serial: Optional[str] = None
+    connected: bool
+
+
 class HealthStatus(BaseModel):
     ok: bool = True
     robot_ip: str

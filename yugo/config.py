@@ -27,6 +27,7 @@ Base = declarative_base()
 class RobotConfig(BaseModel):
     ip: str = "192.168.203.75"
     connect_timeout: float = 25.0
+    name: str | None = None  # optional friendly/BLE name (e.g. "Go2_49077")
 
 
 class MotionConfig(BaseModel):

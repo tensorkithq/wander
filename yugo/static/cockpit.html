@@ -11,7 +11,8 @@
     .pane { background: #141821; border: 1px solid #232a36; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
     .pane h2 { margin: 0; padding: 8px 12px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #8b94a7; border-bottom: 1px solid #232a36; }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-    .side { display: grid; grid-template-rows: auto 1fr; gap: 12px; }
+    .side { display: grid; grid-template-rows: auto auto 1fr; gap: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .vitals { padding: 12px; display: grid; gap: 8px; }
     .row { display: flex; justify-content: space-between; }
     .k { color: #8b94a7; }
@@ -28,6 +29,15 @@
       <video id="video" autoplay playsinline muted></video>
     </section>
     <div class="side">
+      <section class="pane">
+        <h2>Device</h2>
+        <div class="vitals mono">
+          <div class="row"><span class="k">name</span><span id="dev-name">…</span></div>
+          <div class="row"><span class="k">ip</span><span id="dev-ip">…</span></div>
+          <div class="row"><span class="k">mac</span><span id="dev-mac">…</span></div>
+          <div class="row"><span class="k">serial</span><span id="dev-serial">…</span></div>
+        </div>
+      </section>
       <section class="pane">
         <h2>Vitals</h2>
         <div class="vitals">
@@ -99,8 +109,20 @@
       ws.onclose = () => setTimeout(startState, 1000); // auto-reconnect
     }
 
+    // --- Connected device identity (/robot/info, keyed by the known IP) ---
+    async function loadDevice() {
+      try {
+        const d = await (await fetch("/robot/info")).json();
+        document.getElementById("dev-name").textContent = d.name || (d.serial ? "Go2" : "—");
+        document.getElementById("dev-ip").textContent = d.ip || "—";
+        document.getElementById("dev-mac").textContent = d.mac || "—";
+        document.getElementById("dev-serial").textContent = d.serial || "—";
+      } catch (_) { /* leave placeholders */ }
+    }
+
     startVideo();
     startState();
+    loadDevice();
   </script>
 </body>
 </html>
