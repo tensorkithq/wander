@@ -187,7 +187,7 @@ export default function ZenScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     // Ending the session → stand the dog back up. (active is the pre-toggle value,
     // so this only fires on a real END press, never on mount.)
-    if (active) trick('BalanceStand');
+    if (active) trick('StandUp'); // rise from the seated zen posture (BalanceStand won't lift from a full sit)
     setActive((a) => !a);
     setPhaseIdx(0);
   };
