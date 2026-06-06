@@ -42,10 +42,13 @@ MOTION_SPELL_VERSION = 1  # watch device-motion engine (accel + gyro); versions 
 RESAMPLE_N = 64  # fixed trace length after time-uniform resampling
 SCALE_EPS = 1e-6  # guard against divide-by-zero on a still trace
 
-# Fixed bucket -> SPORT_CMD trick table. Safe expressive moves only — NO flips,
-# NO handstand, and NO WiggleHips (removed as broken). BUCKET_COUNT is
+# Fixed bucket -> SPORT_CMD trick table. Safe moves only — NO flips, NO jumps,
+# NO handstand, NO pounce, and NO WiggleHips (removed as broken). BUCKET_COUNT is
 # len(TRICK_TABLE); every bucket maps to a move, so a valid trace always casts.
+# NOTE: changing this table's CONTENTS or LENGTH remaps every spell (bucket =
+# hash % len) — determinism is preserved, but the trace->trick mapping shifts.
 TRICK_TABLE: List[str] = [
+    # core expressive (in place)
     "Hello",
     "Scrape",
     "Stretch",
@@ -57,6 +60,13 @@ TRICK_TABLE: List[str] = [
     "Pose",
     "Content",
     "RiseSit",
+    # playful, low-risk (roughly in place)
+    "Wallow",
+    "Bound",
+    # stylized walks — flashy footwork; the dog travels a little (needs floor space)
+    "CrossStep",
+    "CrossWalk",
+    "OnesidedStep",
     # repeats below weight the more expressive / "fun" moves a bit higher
     "Dance1",
     "FingerHeart",
@@ -65,6 +75,7 @@ TRICK_TABLE: List[str] = [
     "Stretch",
     "Pose",
     "MoonWalk",
+    "Wallow",
 ]
 BUCKET_COUNT = len(TRICK_TABLE)
 
